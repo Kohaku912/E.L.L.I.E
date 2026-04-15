@@ -124,19 +124,25 @@ def reconstruct_room_point_cloud(
     )
 
     disparity = stereo.compute(gray_l, gray_r).astype(np.float32) / 16.0
+
+    print("disparity min/max:", float(np.min(disparity)), float(np.max(disparity)))
+
     points_3d = cv2.reprojectImageTo3D(disparity, Q)
 
-    # 有効点だけ抽出
-    mask = disparity > 0.5
+    mask = disparity > 0.1
+    print("mask count:", int(mask.sum()))
+
     pts = points_3d[mask]
     cols = left_r[mask]
+    print("pts before bounds:", len(pts))
 
-    # 部屋の範囲でクリップ
     in_room = (
         (pts[:, 0] >= bounds.min_x) & (pts[:, 0] <= bounds.max_x) &
         (pts[:, 1] >= bounds.min_y) & (pts[:, 1] <= bounds.max_y) &
         (pts[:, 2] >= bounds.min_z) & (pts[:, 2] <= bounds.max_z)
     )
+
+    print("pts after bounds:", int(in_room.sum()))
 
     pts = pts[in_room]
     cols = cols[in_room]
