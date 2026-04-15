@@ -15,7 +15,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
+import numpy as np
 
+
+from room_3d import (
+    StereoParams,
+    CameraDevices,
+    RoomBounds,
+    reconstruct_room_point_cloud,
+)
 
 # -----------------------------
 # Utilities
@@ -281,6 +289,25 @@ async def camera_snapshot(camera_name: str) -> Response:
 
     jpg = snapshot_jpeg(camera_name)
     return Response(content=jpg, media_type="image/jpeg")
+
+@app.get("/api/room/reconstruct")
+async def reconstruct_room():
+    params = StereoParams(
+        K1=np.array([[700.0, 0.0, 320.0], [0.0, 700.0, 240.0], [0.0, 0.0, 1.0]], dtype=np.float32),
+        D1=np.zeros(5, dtype=np.float32),
+        K2=np.array([[700.0, 0.0, 320.0], [0.0, 700.0, 240.0], [0.0, 0.0, 1.0]], dtype=np.float32),
+        D2=np.zeros(5, dtype=np.float32),
+        R=np.eye(3, dtype=np.float32),
+        T=np.array([0.25, 0.0, 0.0], dtype=np.float32),  # 2台の間隔(例)
+        image_size=(640, 480),
+    )
+
+    result = reconstruct_room_point_cloud(
+        params=params,
+        devices=CameraDevices(left="/dev/video0", right="/dev/video2"),
+        bounds=RoomBounds(min_x=-3, max_x=3, min_y=-2, max_y=2, min_z=0, max_z=6),
+    )
+    return result
 
 @app.get("/health")
 async def health() -> dict[str, str]:
