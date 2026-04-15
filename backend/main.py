@@ -303,7 +303,7 @@ async def reconstruct_room():
 
     result = reconstruct_room_point_cloud(
         params=params,
-        devices=CameraDevices(left="/dev/video0", right="/dev/video2"),
+        devices=CameraDevices(left="video0", right="video2"),
         bounds=RoomBounds(min_x=-3, max_x=3, min_y=-2, max_y=2, min_z=0, max_z=6),
     )
     return result
