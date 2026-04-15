@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,9 +10,10 @@ from typing import Any, Literal
 
 import asyncio
 
+import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
 
 
@@ -30,7 +32,76 @@ def new_id() -> str:
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATA_FILE = DATA_DIR / "room_state.json"
+# -----------------------------
+# Camera streaming
+# -----------------------------
 
+CAMERA_DEVICE_MAP: dict[str, str] = {
+    "video0": "/dev/video0",
+    "video2": "/dev/video2",
+}
+
+
+def open_camera(camera_name: str) -> cv2.VideoCapture:
+    if camera_name not in CAMERA_DEVICE_MAP:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    device_path = CAMERA_DEVICE_MAP[camera_name]
+
+    # まず /dev/videoX を開く。失敗したら index でも試す。
+    cap = cv2.VideoCapture(device_path)
+    if cap.isOpened():
+        return cap
+
+    cap.release()
+
+    index = int(camera_name.replace("video", ""))
+    cap = cv2.VideoCapture(index)
+    if cap.isOpened():
+        return cap
+
+    cap.release()
+    raise HTTPException(status_code=500, detail=f"failed to open camera: {camera_name}")
+
+
+def mjpeg_generator(camera_name: str, fps: float = 15.0):
+    cap = open_camera(camera_name)
+
+    try:
+        delay = 1.0 / fps
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                time.sleep(0.1)
+                continue
+
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if not ok:
+                continue
+
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+            )
+            time.sleep(delay)
+    finally:
+        cap.release()
+
+
+def snapshot_jpeg(camera_name: str) -> bytes:
+    cap = open_camera(camera_name)
+    try:
+        ok, frame = cap.read()
+        if not ok:
+            raise HTTPException(status_code=500, detail=f"failed to read frame: {camera_name}")
+
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        if not ok:
+            raise HTTPException(status_code=500, detail=f"failed to encode frame: {camera_name}")
+
+        return buf.tobytes()
+    finally:
+        cap.release()
 
 # -----------------------------
 # Models
@@ -185,6 +256,31 @@ async def on_startup() -> None:
     if not store.logs:
         await add_log("success", "バックエンドを起動しました")
 
+@app.get("/video0")
+async def video0() -> StreamingResponse:
+    return StreamingResponse(
+        mjpeg_generator("video0"),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/video2")
+async def video2() -> StreamingResponse:
+    return StreamingResponse(
+        mjpeg_generator("video2"),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/api/cameras/{camera_name}/snapshot")
+async def camera_snapshot(camera_name: str) -> Response:
+    if camera_name not in CAMERA_DEVICE_MAP:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    jpg = snapshot_jpeg(camera_name)
+    return Response(content=jpg, media_type="image/jpeg")
 
 @app.get("/health")
 async def health() -> dict[str, str]:
