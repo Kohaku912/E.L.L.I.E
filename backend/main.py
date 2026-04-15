@@ -288,13 +288,63 @@ async def camera_snapshot(camera_name: str) -> Response:
 
 @app.get("/api/room/reconstruct")
 async def reconstruct_room():
+    def rot_x(deg: float) -> np.ndarray:
+        a = np.deg2rad(deg)
+        c, s = np.cos(a), np.sin(a)
+        return np.array([
+            [1, 0, 0],
+            [0, c, -s],
+            [0, s,  c],
+        ], dtype=np.float32)
+
+    def rot_y(deg: float) -> np.ndarray:
+        a = np.deg2rad(deg)
+        c, s = np.cos(a), np.sin(a)
+        return np.array([
+            [ c, 0, s],
+            [ 0, 1, 0],
+            [-s, 0, c],
+        ], dtype=np.float32)
+    
+    C2_w = np.array([0.028, 0.0, 0.023], dtype=np.float32)   # camera2
+    C1_w = np.array([3.505, 0.0, 2.353], dtype=np.float32)   # camera1
+
+    # ---- カメラの向き（度）----
+    # 下向き15°は pitch=-15° として扱う
+    yaw1 = 40.3
+    pitch1 = -15.0
+    yaw2 = 25.0
+    pitch2 = 0.0
+
+    # camera -> world の回転
+    Rwc1 = rot_y(yaw1) @ rot_x(pitch1)
+    Rwc2 = rot_y(yaw2) @ rot_x(pitch2)
+
+    # stereoRectify 用の相対姿勢
+    # x2 = R * x1 + T
+    R = (Rwc2.T @ Rwc1).astype(np.float32)
+    T = (Rwc2.T @ (C1_w - C2_w)).astype(np.float32)
+
+    # ---- 内部パラメータはまだ仮 ----
+    fx = fy = 700.0
+    cx = 320.0
+    cy = 240.0
+
+    K = np.array([
+        [fx, 0.0, cx],
+        [0.0, fy, cy],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float32)
+
+    D = np.zeros(5, dtype=np.float32)
+
     params = StereoParams(
-        K1=np.array([[700.0, 0.0, 320.0], [0.0, 700.0, 240.0], [0.0, 0.0, 1.0]], dtype=np.float32),
-        D1=np.zeros(5, dtype=np.float32),
-        K2=np.array([[700.0, 0.0, 320.0], [0.0, 700.0, 240.0], [0.0, 0.0, 1.0]], dtype=np.float32),
-        D2=np.zeros(5, dtype=np.float32),
-        R=np.eye(3, dtype=np.float32),
-        T=np.array([4.21, 0.0, 0.0], dtype=np.float32),  # 2台の間隔(例)
+        K1=K,
+        D1=D,
+        K2=K.copy(),
+        D2=D.copy(),
+        R=R,
+        T=T,
         image_size=(640, 480),
     )
 
