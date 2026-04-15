@@ -7,9 +7,9 @@ from typing import Any
 import cv2
 import numpy as np
 
-camera_caps = {
-    "video0": cv2.VideoCapture("/dev/video0"),
-    "video2": cv2.VideoCapture("/dev/video2"),
+camera_devices = {
+    "video0": "/dev/video0",
+    "video2": "/dev/video2",
 }
 
 @dataclass
@@ -61,17 +61,31 @@ def _open_camera(device: str) -> cv2.VideoCapture:
 
 
 def capture_frame(camera_name: str):
-    cap = camera_caps[camera_name]
+    device = camera_devices.get(camera_name)
+    if device is None:
+        raise RuntimeError(f"unknown camera: {camera_name}")
+
+    # 文字列パスでも index でも両方試す
+    cap = cv2.VideoCapture(device)
+    if not cap.isOpened():
+        cap.release()
+        try:
+            idx = int(str(device).replace("/dev/video", ""))
+            cap = cv2.VideoCapture(idx)
+        except Exception:
+            cap = cv2.VideoCapture(device)
 
     if not cap.isOpened():
+        cap.release()
         raise RuntimeError(f"camera not opened: {camera_name}")
 
-    ok, frame = cap.read()
-    if not ok:
-        raise RuntimeError(f"failed to read: {camera_name}")
-
-    return frame
-
+    try:
+        ok, frame = cap.read()
+        if not ok:
+            raise RuntimeError(f"failed to read: {camera_name}")
+        return frame
+    finally:
+        cap.release()
 
 def _make_rectify_maps(params: StereoParams):
     w, h = params.image_size
