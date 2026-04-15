@@ -7,6 +7,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+cap = cv2.VideoCapture("/dev/video0")
+print(cap.isOpened())
 camera_caps = {
     "video0": cv2.VideoCapture("/dev/video0"),
     "video2": cv2.VideoCapture("/dev/video2"),
