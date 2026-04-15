@@ -7,6 +7,10 @@ from typing import Any
 import cv2
 import numpy as np
 
+camera_caps = {
+    "video0": cv2.VideoCapture("/dev/video0"),
+    "video2": cv2.VideoCapture("/dev/video2"),
+}
 
 @dataclass
 class RoomBounds:
@@ -56,15 +60,17 @@ def _open_camera(device: str) -> cv2.VideoCapture:
     raise RuntimeError(f"cannot open camera: {device}")
 
 
-def capture_frame(device: str) -> np.ndarray:
-    cap = _open_camera(device)
-    try:
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            raise RuntimeError(f"failed to read frame: {device}")
-        return frame
-    finally:
-        cap.release()
+def capture_frame(camera_name: str):
+    cap = camera_caps[camera_name]
+
+    if not cap.isOpened():
+        raise RuntimeError(f"camera not opened: {camera_name}")
+
+    ok, frame = cap.read()
+    if not ok:
+        raise RuntimeError(f"failed to read: {camera_name}")
+
+    return frame
 
 
 def _make_rectify_maps(params: StereoParams):

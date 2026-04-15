@@ -49,7 +49,6 @@ CAMERA_DEVICE_MAP: dict[str, str] = {
     "video2": "/dev/video2",
 }
 
-
 def open_camera(camera_name: str) -> cv2.VideoCapture:
     if camera_name not in CAMERA_DEVICE_MAP:
         raise HTTPException(status_code=404, detail="camera not found")
