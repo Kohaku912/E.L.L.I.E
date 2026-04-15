@@ -24,6 +24,7 @@ from room_3d import (
     RoomBounds,
     reconstruct_room_point_cloud,
 )
+from camera_manager import camera_manager
 
 # -----------------------------
 # Utilities
@@ -72,43 +73,35 @@ def open_camera(camera_name: str) -> cv2.VideoCapture:
 
 
 def mjpeg_generator(camera_name: str, fps: float = 15.0):
-    cap = open_camera(camera_name)
+    delay = 1.0 / fps
 
-    try:
-        delay = 1.0 / fps
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                time.sleep(0.1)
-                continue
+    while True:
+        try:
+            frame = camera_manager.get_frame(camera_name)
+        except Exception:
+            time.sleep(0.1)
+            continue
 
-            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            if not ok:
-                continue
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ok:
+            continue
 
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
-            )
-            time.sleep(delay)
-    finally:
-        cap.release()
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        )
+
+        time.sleep(delay)
 
 
 def snapshot_jpeg(camera_name: str) -> bytes:
-    cap = open_camera(camera_name)
-    try:
-        ok, frame = cap.read()
-        if not ok:
-            raise HTTPException(status_code=500, detail=f"failed to read frame: {camera_name}")
+    frame = camera_manager.get_frame(camera_name)
 
-        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        if not ok:
-            raise HTTPException(status_code=500, detail=f"failed to encode frame: {camera_name}")
+    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    if not ok:
+        raise HTTPException(status_code=500, detail="encode error")
 
-        return buf.tobytes()
-    finally:
-        cap.release()
+    return buf.tobytes()
 
 # -----------------------------
 # Models
@@ -260,6 +253,10 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup() -> None:
     load_store()
+
+    camera_manager.start_camera("video0")
+    camera_manager.start_camera("video2")
+
     if not store.logs:
         await add_log("success", "バックエンドを起動しました")
 

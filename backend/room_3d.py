@@ -6,11 +6,10 @@ from typing import Any
 
 import cv2
 import numpy as np
+from camera_manager import camera_manager
 
-camera_devices = {
-    "video0": "/dev/video0",
-    "video2": "/dev/video2",
-}
+def capture_frame(camera_name: str):
+    return camera_manager.get_frame(camera_name)
 
 @dataclass
 class RoomBounds:
@@ -59,33 +58,6 @@ def _open_camera(device: str) -> cv2.VideoCapture:
 
     raise RuntimeError(f"cannot open camera: {device}")
 
-
-def capture_frame(camera_name: str):
-    device = camera_devices.get(camera_name)
-    if device is None:
-        raise RuntimeError(f"unknown camera: {camera_name}")
-
-    # 文字列パスでも index でも両方試す
-    cap = cv2.VideoCapture(device)
-    if not cap.isOpened():
-        cap.release()
-        try:
-            idx = int(str(device).replace("/dev/video", ""))
-            cap = cv2.VideoCapture(idx)
-        except Exception:
-            cap = cv2.VideoCapture(device)
-
-    if not cap.isOpened():
-        cap.release()
-        raise RuntimeError(f"camera not opened: {camera_name}")
-
-    try:
-        ok, frame = cap.read()
-        if not ok:
-            raise RuntimeError(f"failed to read: {camera_name}")
-        return frame
-    finally:
-        cap.release()
 
 def _make_rectify_maps(params: StereoParams):
     w, h = params.image_size
