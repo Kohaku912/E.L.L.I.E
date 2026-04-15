@@ -135,7 +135,9 @@ def reconstruct_room_point_cloud(
     pts = points_3d[mask]
     cols = left_r[mask]
     print("pts before bounds:", len(pts))
-
+    print("pts x:", float(pts[:, 0].min()), float(pts[:, 0].max()))
+    print("pts y:", float(pts[:, 1].min()), float(pts[:, 1].max()))
+    print("pts z:", float(pts[:, 2].min()), float(pts[:, 2].max()))
     in_room = (
         (pts[:, 0] >= bounds.min_x) & (pts[:, 0] <= bounds.max_x) &
         (pts[:, 1] >= bounds.min_y) & (pts[:, 1] <= bounds.max_y) &
