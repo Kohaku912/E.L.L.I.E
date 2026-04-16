@@ -222,7 +222,6 @@ pub fn spawn_discord_listener(
             if let Some(token) = rt.block_on(check_token()) {
                 break token;
             }
-            println!("Waiting for OAuth...");
             thread::sleep(Duration::from_secs(2));
         };
 
@@ -281,7 +280,6 @@ pub fn spawn_discord_listener(
                         .to_string();
 
                     handle_discord_message(&cache, msg.clone());
-                    println!("event: {}", evt);
 
                     match evt.as_str() {
                         "VOICE_CHANNEL_SELECT" => {
@@ -444,11 +442,6 @@ fn refresh_selected_voice_snapshot(
     let selected: Option<RpcSelectedVoiceChannel> =
         rpc_request(client, "GET_SELECTED_VOICE_CHANNEL", None);
 
-    println!(
-        "selected voice channel = {:?}",
-        selected.as_ref().map(|c| &c.id)
-    );
-
     let Some(channel) = selected else {
         if let Ok(mut guard) = voice_cache.write() {
             *guard = DiscordVoiceInfo::default();
@@ -466,9 +459,6 @@ fn refresh_selected_voice_snapshot(
             evt,
             Some(json!({ "channel_id": channel_id })),
         );
-        if result.is_none() {
-            eprintln!("SUBSCRIBE {evt} failed for channel {channel_id}");
-        }
     }
 
     let members = channel

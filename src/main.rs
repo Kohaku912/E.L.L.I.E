@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod discord;
 mod handlers;
 mod models;
@@ -6,7 +7,7 @@ mod state;
 mod token;
 
 use axum::{routing::get, Router};
-use std::{env, net::SocketAddr, sync::Arc, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{env, net::SocketAddr, sync::{Arc, Mutex}, thread, time::{Duration, SystemTime, UNIX_EPOCH, Instant}};
 
 use crate::{
     discord::{discord_oauth_callback, discord_oauth_start, spawn_discord_listener,open_browser},
@@ -25,22 +26,15 @@ fn main() {
 
     let client_id =
         env::var("DISCORD_CLIENT_ID").unwrap_or_else(|_| "YOUR_DISCORD_CLIENT_ID".to_string());
-    println!("client_id: {:?}", std::env::var("DISCORD_CLIENT_ID"));
 
     thread::spawn(move || {
         spawn_discord_listener(discord_cache, voice_cache, oauth_state, client_id);
     });
 
-    let snapshot = Arc::new(std::sync::RwLock::new(build_snapshot()));
-    let updater = Arc::clone(&snapshot);
-
-    thread::spawn(move || loop {
-        let next = build_snapshot();
-        if let Ok(mut guard) = updater.write() {
-            *guard = next;
-        }
-        thread::sleep(Duration::from_secs(1));
-    });
+    let snapshot = Arc::new(Mutex::new(crate::state::CachedSnapshot {
+        snapshot: build_snapshot(),
+        fetched_at: Instant::now(),
+    }));
 
     let app = Router::new()
         .route("/health", get(health))
@@ -90,7 +84,6 @@ fn main() {
         };
 
         if open {
-            println!("Token missing/expired → opening OAuth");
             let _ = open_browser("http://127.0.0.1:3000/api/v1/discord/oauth/start");
         }
     });
@@ -98,7 +91,6 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async move {
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        println!("listening on http://{addr}");
         axum::serve(listener, app).await.unwrap();
     });
 }

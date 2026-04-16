@@ -1,11 +1,17 @@
 // src/state.rs
 use crate::models::*;
 use once_cell::sync::Lazy;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub snapshot: Arc<RwLock<Snapshot>>,
+    pub snapshot: Arc<Mutex<CachedSnapshot>>,
+}
+
+pub struct CachedSnapshot {
+    pub snapshot: Snapshot,
+    pub fetched_at: Instant,
 }
 
 pub static DISCORD_CACHE: Lazy<Arc<RwLock<DiscordInfo>>> =

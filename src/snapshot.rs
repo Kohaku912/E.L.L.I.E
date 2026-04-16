@@ -1,18 +1,24 @@
 use crate::models::*;
-use crate::state::{DISCORD_CACHE, DISCORD_VOICE_CACHE};
+use crate::state::{AppState, CachedSnapshot, DISCORD_CACHE, DISCORD_VOICE_CACHE};
 use std::thread;
+use std::time::{Duration, Instant};
 use sysinfo::{Components, Disks, Networks, System};
 use serde::Deserialize;
 
 #[cfg(target_os = "windows")]
 use wmi::WMIConnection;
 
-pub fn read_snapshot(state: &crate::state::AppState) -> Snapshot {
-    state
-        .snapshot
-        .read()
-        .map(|g| g.clone())
-        .unwrap_or_default()
+pub fn read_snapshot(state: &AppState) -> Snapshot {
+    let mut guard = state.snapshot.lock().unwrap();
+
+    if guard.fetched_at.elapsed() < Duration::from_secs(1) {
+        return guard.snapshot.clone();
+    }
+
+    let next = build_snapshot();
+    guard.snapshot = next.clone();
+    guard.fetched_at = Instant::now();
+    next
 }
 
 pub fn build_snapshot() -> Snapshot {

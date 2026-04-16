@@ -58,7 +58,6 @@ pub async fn check_token() -> Option<String> {
         .as_secs();
 
     if now + 60 >= token.expires_at {
-        println!("Token expired → refreshing...");
 
         if let Some(new_token) = refresh_access_token(&token.refresh_token).await {
             save_token(&new_token);
