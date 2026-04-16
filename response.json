@@ -1,0 +1,223 @@
+{
+  "summary": {
+    "hostname": "Option<String>",
+    "os_name": "Option<String>",
+    "os_version": "Option<String>",
+    "kernel_version": "Option<String>",
+    "cpu_arch": "Option<String>",
+    "computer_name": "Option<String>",
+    "model": "Option<String>"
+  },
+  "system": {
+    "hostname": "Option<String>",
+    "os_name": "Option<String>",
+    "os_version": "Option<String>",
+    "kernel_version": "Option<String>",
+    "cpu_arch": "Option<String>",
+    "computer_system": [
+      {
+        "manufacturer": "Option<String>",
+        "model": "Option<String>",
+        "username": "Option<String>",
+        "domain": "Option<String>",
+        "total_physical_memory": "Option<u64>",
+        "number_of_logical_processors": "Option<u32>",
+        "number_of_processors": "Option<u32>"
+      }
+    ],
+    "bios": [
+      {
+        "manufacturer": "Option<String>",
+        "smbios_bios_version": "Option<String>",
+        "serial_number": "Option<String>",
+        "release_date": "Option<String>"
+      }
+    ],
+    "baseboard": [
+      {
+        "manufacturer": "Option<String>",
+        "product": "Option<String>",
+        "serial_number": "Option<String>"
+      }
+    ]
+  },
+  "cpu": {
+    "physical_cores": "Option<usize>",
+    "logical_cores": "usize",
+    "global_usage": "f32",
+    "cores": [
+      {
+        "name": "String",
+        "brand": "String",
+        "vendor_id": "String",
+        "usage": "f32",
+        "frequency_mhz": "u64"
+      }
+    ]
+  },
+  "memory": {
+    "total_memory": "u64",
+    "used_memory": "u64",
+    "free_memory": "u64",
+    "available_memory": "u64",
+    "total_swap": "u64",
+    "used_swap": "u64",
+    "free_swap": "u64",
+    "modules": [
+      {
+        "capacity": "Option<u64>",
+        "speed": "Option<u32>",
+        "manufacturer": "Option<String>",
+        "part_number": "Option<String>",
+        "serial_number": "Option<String>",
+        "form_factor": "Option<u16>",
+        "memory_type": "Option<u16>"
+      }
+    ]
+  },
+  "storage": {
+    "disks": [
+      {
+        "name": "String",
+        "mount_point": "String",
+        "file_system": "String",
+        "total_space": "u64",
+        "available_space": "u64",
+        "removable": "bool",
+        "read_only": "bool"
+      }
+    ]
+  },
+  "network": {
+    "interfaces": [
+      {
+        "interface": "String",
+        "mac_address": "String",
+        "total_received": "u64",
+        "total_transmitted": "u64",
+        "total_packets_received": "u64",
+        "total_packets_transmitted": "u64"
+      }
+    ],
+    "adapters": [
+      {
+        "name": "Option<String>",
+        "mac_address": "Option<String>",
+        "net_connection_status": "Option<u16>",
+        "speed": "Option<String>",
+        "physical_adapter": "Option<bool>",
+        "adapter_type": "Option<String>",
+        "manufacturer": "Option<String>"
+      }
+    ]
+  },
+  "hardware": {
+    "bios": "Vec<BiosInfo>",
+    "baseboard": "Vec<BaseboardInfo>",
+    "computer_system": "Vec<ComputerSystemInfo>"
+  },
+  "gpu": {
+    "controllers": [
+      {
+        "name": "Option<String>",
+        "driver_version": "Option<String>",
+        "adapter_ram": "Option<u64>",
+        "current_horizontal_resolution": "Option<u32>",
+        "current_vertical_resolution": "Option<u32>",
+        "current_refresh_rate": "Option<u32>",
+        "video_mode_description": "Option<String>",
+        "status": "Option<String>"
+      }
+    ]
+  },
+  "battery": {
+    "batteries": [
+      {
+        "name": "Option<String>",
+        "battery_status": "Option<u16>",
+        "estimated_charge_remaining": "Option<u16>",
+        "estimated_run_time": "Option<u32>",
+        "design_voltage": "Option<u32>"
+      }
+    ]
+  },
+  "services": {
+    "services": [
+      {
+        "name": "Option<String>",
+        "display_name": "Option<String>",
+        "state": "Option<String>",
+        "start_mode": "Option<String>",
+        "process_id": "Option<u32>",
+        "service_type": "Option<String>"
+      }
+    ]
+  },
+  "processes": {
+    "top": [
+      {
+        "pid": "String",
+        "name": "String",
+        "exe": "Option<String>",
+        "cmd": "Vec<String>",
+        "cwd": "Option<String>",
+        "parent": "Option<String>",
+        "status": "String",
+        "cpu_usage": "f32",
+        "memory": "u64",
+        "disk_read": "u64",
+        "disk_written": "u64"
+      }
+    ]
+  },
+  "sensors": {
+    "components": [
+      {
+        "label": "String",
+        "temperature": "Option<f32>",
+        "max": "Option<f32>",
+        "critical": "Option<f32>"
+      }
+    ]
+  },
+  "mouse": {
+    "x": "i32",
+    "y": "i32"
+  },
+  "discord": {
+    "connected": "bool",
+    "user": {
+      "id": "String",
+      "username": "String",
+      "discriminator": "String",
+      "global_name": "Option<String>",
+      "avatar": "Option<String>"
+    },
+    "scopes": "Vec<String>",
+    "last_event": "Option<String>"
+  },
+  "discord_voice": {
+    "selected_channel_id": "Option<String>",
+    "selected_channel_name": "Option<String>",
+    "guild_id": "Option<String>",
+    "channel_type": "Option<i32>",
+    "members": [
+      {
+        "user_id": "String",
+        "username": "String",
+        "discriminator": "String",
+        "avatar": "Option<String>",
+        "bot": "bool",
+        "nick": "Option<String>",
+        "mute": "bool",
+        "deaf": "bool",
+        "self_mute": "bool",
+        "self_deaf": "bool",
+        "suppress": "bool",
+        "volume": "Option<f64>",
+        "pan_left": "Option<f64>",
+        "pan_right": "Option<f64>"
+      }
+    ]
+  }
+}
