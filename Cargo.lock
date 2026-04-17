@@ -955,6 +955,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tokio",
+ "tower-http",
  "urlencoding",
  "windows",
  "wmi",
