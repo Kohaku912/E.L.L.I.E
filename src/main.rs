@@ -6,6 +6,7 @@ mod snapshot;
 mod state;
 mod token;
 
+use tower_http::cors::{CorsLayer, Any};
 use axum::{routing::get, Router};
 use std::{env, net::SocketAddr, sync::{Arc, Mutex}, thread, time::{Duration, SystemTime, UNIX_EPOCH, Instant}};
 
@@ -36,6 +37,11 @@ fn main() {
         fetched_at: Instant::now(),
     }));
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/v1/state", get(all_state))
@@ -64,6 +70,7 @@ fn main() {
         .route("/api/v1/discord/voice/members", get(discord_voice_members_state))
         .route("/api/v1/discord/oauth/start", get(discord_oauth_start))
         .route("/api/v1/discord/oauth/callback", get(discord_oauth_callback))
+        .layer(cors)
         .with_state(AppState { snapshot });
 
     let addr: SocketAddr = "0.0.0.0:3000".parse().unwrap();
