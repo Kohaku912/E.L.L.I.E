@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">android_ellie</string>
+    <string name="accessibility_service_description">端末のUI状態を収集し、AIに提供するためのサービスです。</string>
+</resources>
