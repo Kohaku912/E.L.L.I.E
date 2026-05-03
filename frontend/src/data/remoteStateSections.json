@@ -1,0 +1,239 @@
+{
+  "sections": [
+    {
+      "key": "summary",
+      "title": "全体状態",
+      "kind": "cards",
+      "items": [
+        { "label": "hostname", "path": "summary.hostname" },
+        { "label": "computer", "path": "summary.computer_name" },
+        { "label": "model", "path": "summary.model" },
+        { "label": "os", "path": "summary.os_name" },
+        { "label": "os version", "path": "summary.os_version" },
+        { "label": "kernel", "path": "summary.kernel_version" },
+        { "label": "cpu arch", "path": "summary.cpu_arch" }
+      ],
+      "defaultOpen": true
+    },
+    {
+      "key": "system",
+      "title": "System",
+      "kind": "cards",
+      "items": [
+        { "label": "hostname", "path": "system.hostname" },
+        { "label": "os", "path": "system.os_name" },
+        { "label": "version", "path": "system.os_version" },
+        { "label": "kernel", "path": "system.kernel_version" },
+        { "label": "arch", "path": "system.cpu_arch" }
+      ],
+      "defaultOpen": false
+    },
+    {
+      "key": "cpu",
+      "title": "CPU",
+      "kind": "progressCards",
+      "progress": { "label": "global usage", "path": "cpu.global_usage", "unit": "%" },
+      "items": [
+        { "label": "physical", "path": "cpu.physical_cores", "unit": "core" },
+        { "label": "logical", "path": "cpu.logical_cores", "unit": "thread" }
+      ],
+      "list": {
+        "path": "cpu.cores",
+        "emptyText": "cores がありません",
+        "titlePath": "name",
+        "subtitlePaths": [
+          { "path": "brand" },
+          { "path": "vendor_id" },
+          { "path": "frequency_mhz", "unit": "MHz" }
+        ],
+        "rightPath": "usage",
+        "rightUnit": "%"
+      },
+      "defaultOpen": true
+    },
+    {
+      "key": "memory",
+      "title": "Memory",
+      "kind": "progressCards",
+      "progress": { "label": "memory usage", "path": "memory.used_memory", "unit": "bytes", "ratioPath": "memory.total_memory" },
+      "items": [
+        { "label": "total", "path": "memory.total_memory", "unit": "bytes" },
+        { "label": "used", "path": "memory.used_memory", "unit": "bytes" },
+        { "label": "free", "path": "memory.free_memory", "unit": "bytes" },
+        { "label": "available", "path": "memory.available_memory", "unit": "bytes" }
+      ],
+      "list": {
+        "path": "memory.modules",
+        "emptyText": "モジュール情報はありません",
+        "titlePath": "part_number",
+        "subtitlePaths": [
+          { "path": "capacity", "unit": "bytes" },
+          { "path": "speed", "unit": "MHz" },
+          { "path": "manufacturer" }
+        ]
+      },
+      "defaultOpen": true
+    },
+    {
+      "key": "storage",
+      "title": "Storage",
+      "kind": "listCards",
+      "list": {
+        "path": "storage.disks",
+        "emptyText": "ディスク情報がありません",
+        "titlePath": "name",
+        "subtitlePaths": [
+          { "path": "mount_point" },
+          { "path": "file_system" }
+        ],
+        "footerPath": "total_space",
+        "footerUnit": "bytes"
+      },
+      "defaultOpen": false
+    },
+    {
+      "key": "network",
+      "title": "Network",
+      "kind": "dualList",
+      "left": {
+        "title": "interfaces",
+        "path": "network.interfaces",
+        "emptyText": "interfaces がありません",
+        "titlePath": "interface",
+        "subtitlePaths": [
+          { "path": "mac_address" },
+          { "path": "total_received", "unit": "bytes" },
+          { "path": "total_transmitted", "unit": "bytes" }
+        ]
+      },
+      "right": {
+        "title": "adapters",
+        "path": "network.adapters",
+        "emptyText": "adapters がありません",
+        "titlePath": "name",
+        "subtitlePaths": [
+          { "path": "manufacturer" },
+          { "path": "adapter_type" },
+          { "path": "speed" }
+        ]
+      },
+      "defaultOpen": false
+    },
+    {
+      "key": "gpu",
+      "title": "GPU",
+      "kind": "listCards",
+      "list": {
+        "path": "gpu.controllers",
+        "emptyText": "GPU情報がありません",
+        "titlePath": "name",
+        "subtitlePaths": [
+          { "path": "driver_version" },
+          { "path": "status" },
+          { "path": "current_horizontal_resolution" },
+          { "path": "current_vertical_resolution" }
+        ]
+      },
+      "defaultOpen": false
+    },
+    {
+      "key": "battery",
+      "title": "Battery",
+      "kind": "listCards",
+      "list": {
+        "path": "battery.batteries",
+        "emptyText": "バッテリー情報がありません",
+        "titlePath": "name",
+        "subtitlePaths": [
+          { "path": "estimated_charge_remaining", "unit": "%" },
+          { "path": "estimated_run_time", "unit": "min" }
+        ]
+      },
+      "defaultOpen": false
+    },
+    {
+      "key": "services",
+      "title": "Services",
+      "kind": "listCards",
+      "list": {
+        "path": "services.services",
+        "emptyText": "サービス情報がありません",
+        "titlePath": "display_name",
+        "subtitlePaths": [
+          { "path": "state" },
+          { "path": "start_mode" },
+          { "path": "process_id", "unit": "PID" }
+        ]
+      },
+      "defaultOpen": false
+    },
+    {
+      "key": "processes",
+      "title": "Processes",
+      "kind": "listCards",
+      "list": {
+        "path": "processes.top",
+        "emptyText": "プロセス情報がありません",
+        "titlePath": "name",
+        "subtitlePaths": [
+          { "path": "pid", "unit": "PID" },
+          { "path": "memory", "unit": "bytes" },
+          { "path": "status" }
+        ],
+        "rightPath": "cpu_usage",
+        "rightUnit": "%"
+      },
+      "defaultOpen": false
+    },
+    {
+      "key": "sensors",
+      "title": "Sensors",
+      "kind": "listCards",
+      "list": {
+        "path": "sensors.components",
+        "emptyText": "センサー情報がありません",
+        "titlePath": "label",
+        "subtitlePaths": [
+          { "path": "temperature", "unit": "°C" },
+          { "path": "max", "unit": "°C" },
+          { "path": "critical", "unit": "°C" }
+        ]
+      },
+      "defaultOpen": false
+    },
+    {
+      "key": "mouse",
+      "title": "Mouse",
+      "kind": "cards",
+      "items": [
+        { "label": "x", "path": "mouse.x" },
+        { "label": "y", "path": "mouse.y" }
+      ],
+      "defaultOpen": false
+    },
+    {
+      "key": "discord",
+      "title": "Discord",
+      "kind": "cards",
+      "items": [
+        { "label": "connected", "path": "discord.connected" },
+        { "label": "user", "path": "discord.user.username" },
+        { "label": "discriminator", "path": "discord.user.discriminator" },
+        { "label": "last event", "path": "discord.last_event" }
+      ],
+      "defaultOpen": true
+    },
+    {
+      "key": "voice",
+      "title": "Discord Voice",
+      "kind": "cards",
+      "items": [
+        { "label": "channel", "path": "discord_voice.selected_channel_name" },
+        { "label": "guild", "path": "discord_voice.guild_id" },
+        { "label": "channel type", "path": "discord_voice.channel_type" },
+        { "label": "members", "path": "discord_voice.members.length" }
+      ],
+      "defaultOpen": true
+    }
+  ]
+}

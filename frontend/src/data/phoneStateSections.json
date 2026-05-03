@@ -1,0 +1,308 @@
+{
+  "sections": [
+    {
+      "key": "overview",
+      "title": "概要",
+      "kind": "cards",
+      "items": [
+        { "label": "収集時刻", "path": "collectedAt", "unit": "datetime" },
+        { "label": "パッケージ", "path": "app.packageName" },
+        { "label": "アプリ版本", "path": "app.versionName" },
+        { "label": "コード", "path": "app.code" },
+        { "label": "端末", "path": "device.model" },
+        { "label": "メーカー", "path": "device.manufacturer" }
+      ]
+    },
+    {
+      "key": "device",
+      "title": "端末情報",
+      "kind": "cards",
+      "items": [
+        { "label": "Brand", "path": "device.brand" },
+        { "label": "Model", "path": "device.model" },
+        { "label": "Manufacturer", "path": "device.manufacturer" },
+        { "label": "Device", "path": "device.device" },
+        { "label": "Product", "path": "device.product" },
+        { "label": "Board", "path": "device.board" },
+        { "label": "Hardware", "path": "device.hardware" },
+        { "label": "Bootloader", "path": "device.bootloader" },
+        { "label": "Fingerprint", "path": "device.fingerprint" }
+      ]
+    },
+    {
+      "key": "os",
+      "title": "OS",
+      "kind": "cards",
+      "items": [
+        { "label": "SDK", "path": "os.sdkInt" },
+        { "label": "Release", "path": "os.release" },
+        { "label": "Incremental", "path": "os.incremental" },
+        { "label": "Security Patch", "path": "os.securityPatch" },
+        { "label": "Locale", "path": "os.locale" },
+        { "label": "Time Zone", "path": "os.timeZone" },
+        { "label": "Emulator", "path": "os.isEmulator" },
+        { "label": "Uptime", "path": "os.uptimeMs", "unit": "durationMs" }
+      ]
+    },
+    {
+      "key": "battery",
+      "title": "バッテリー",
+      "kind": "cards",
+      "items": [
+        { "label": "残量", "path": "battery.levelPercent", "unit": "%" },
+        { "label": "状態", "path": "battery.status" },
+        { "label": "給電", "path": "battery.plugged" },
+        { "label": "温度", "path": "battery.temperatureC", "unit": "°C" },
+        { "label": "電圧", "path": "battery.voltageMv", "unit": "mV" },
+        { "label": "健康状態", "path": "battery.health" },
+        { "label": "充電中", "path": "battery.isCharging" }
+      ]
+    },
+    {
+      "key": "memory",
+      "title": "メモリ",
+      "kind": "cards",
+      "items": [
+        { "label": "総量", "path": "memory.totalBytes", "unit": "bytes" },
+        { "label": "空き", "path": "memory.availableBytes", "unit": "bytes" },
+        { "label": "Low Memory", "path": "memory.lowMemory" },
+        { "label": "閾値", "path": "memory.thresholdBytes", "unit": "bytes" },
+        { "label": "App PSS", "path": "memory.appPssKb", "unit": "KB" },
+        { "label": "Private Dirty", "path": "memory.appPrivateDirtyKb", "unit": "KB" }
+      ]
+    },
+    {
+      "key": "storage",
+      "title": "ストレージ",
+      "kind": "cards",
+      "items": [
+        { "label": "総量", "path": "storage.totalBytes", "unit": "bytes" },
+        { "label": "空き", "path": "storage.availableBytes", "unit": "bytes" },
+        { "label": "filesDir", "path": "storage.filesDirBytes", "unit": "bytes" },
+        { "label": "cacheDir", "path": "storage.cacheDirBytes", "unit": "bytes" }
+      ]
+    },
+    {
+      "key": "network",
+      "title": "ネットワーク",
+      "kind": "cards",
+      "items": [
+        { "label": "接続中", "path": "network.isConnected" },
+        { "label": "Transport", "path": "network.transport" },
+        { "label": "Validated", "path": "network.isValidated" },
+        { "label": "Metered", "path": "network.isMetered" },
+        { "label": "Roaming", "path": "network.isRoaming" },
+        { "label": "SSID", "path": "network.wifi.ssid" },
+        { "label": "BSSID", "path": "network.wifi.bssid" },
+        { "label": "Link Speed", "path": "network.wifi.linkSpeedMbps", "unit": "Mbps" },
+        { "label": "Frequency", "path": "network.wifi.frequencyMHz", "unit": "MHz" },
+        { "label": "RSSI", "path": "network.wifi.rssi", "unit": "dBm" }
+      ]
+    },
+    {
+      "key": "audio",
+      "title": "音声",
+      "kind": "cards",
+      "items": [
+        { "label": "Mode", "path": "audio.mode" },
+        { "label": "Ringer", "path": "audio.ringerMode" },
+        { "label": "Music Active", "path": "audio.isMusicActive" },
+        { "label": "Music Volume", "path": "audio.volumeMusic" },
+        { "label": "Ring Volume", "path": "audio.volumeRing" },
+        { "label": "Alarm Volume", "path": "audio.volumeAlarm" },
+        { "label": "Notification Volume", "path": "audio.volumeNotification" }
+      ]
+    },
+    {
+      "key": "display",
+      "title": "表示",
+      "kind": "cards",
+      "items": [
+        { "label": "幅", "path": "display.widthPx", "unit": "px" },
+        { "label": "高さ", "path": "display.heightPx", "unit": "px" },
+        { "label": "Density", "path": "display.density" },
+        { "label": "Refresh", "path": "display.refreshRateHz", "unit": "Hz" },
+        { "label": "Brightness", "path": "display.brightnessMode" },
+        { "label": "Night Mode", "path": "display.isNightMode" },
+        { "label": "Orientation", "path": "display.orientation" }
+      ]
+    },
+    {
+      "key": "power",
+      "title": "電源",
+      "kind": "cards",
+      "items": [
+        { "label": "Interactive", "path": "power.isInteractive" },
+        { "label": "Power Save", "path": "power.isPowerSaveMode" }
+      ]
+    },
+    {
+      "key": "hardware",
+      "title": "ハードウェア",
+      "kind": "cards",
+      "items": [
+        { "label": "Camera", "path": "hardware.hasCamera" },
+        { "label": "Front Camera", "path": "hardware.hasFrontCamera" },
+        { "label": "Microphone", "path": "hardware.hasMicrophone" },
+        { "label": "NFC", "path": "hardware.hasNfc" },
+        { "label": "Bluetooth", "path": "hardware.hasBluetooth" },
+        { "label": "Flash", "path": "hardware.hasFlash" },
+        { "label": "GPS", "path": "hardware.hasGps" },
+        { "label": "Fingerprint", "path": "hardware.hasFingerprint" }
+      ]
+    },
+    {
+      "key": "thermal",
+      "title": "温度状態",
+      "kind": "cards",
+      "items": [
+        { "label": "Thermal Status", "path": "thermal.thermalStatus" }
+      ]
+    },
+    {
+      "key": "sensors",
+      "title": "センサー",
+      "kind": "cards",
+      "items": [
+        { "label": "センサー数", "path": "sensors.sensorCount" }
+      ]
+    },
+    {
+      "key": "sensors-list",
+      "title": "センサー一覧",
+      "kind": "listCards",
+      "list": {
+        "path": "sensors.sensors",
+        "emptyText": "センサー情報がありません",
+        "titlePath": "value"
+      }
+    },
+    {
+      "key": "accessibility",
+      "title": "アクセシビリティ",
+      "kind": "cards",
+      "items": [
+        { "label": "Package", "path": "accessibility.packageName" },
+        { "label": "Class", "path": "accessibility.className" },
+        { "label": "Text", "path": "accessibility.text" },
+        { "label": "Content Desc", "path": "accessibility.contentDescription", "unit": "json" },
+        { "label": "Window Title", "path": "accessibility.windowTitle", "unit": "json" },
+        { "label": "Focused", "path": "accessibility.isFocused" },
+        { "label": "Scrollable", "path": "accessibility.isScrollable" },
+        { "label": "Bounds", "path": "accessibility.bounds", "unit": "json" }
+      ]
+    },
+    {
+      "key": "accessibility-tree",
+      "title": "アクセシビリティ階層",
+      "kind": "listCards",
+      "list": {
+        "path": "accessibility.nodeHierarchy",
+        "emptyText": "ノード階層がありません",
+        "titlePath": "className",
+        "subtitlePaths": [
+          { "path": "text", "unit": "json" },
+          { "path": "contentDescription", "unit": "json" },
+          { "path": "bounds" }
+        ],
+        "rightPath": "packageName"
+      }
+    },
+    {
+      "key": "notifications",
+      "title": "通知",
+      "kind": "listCards",
+      "list": {
+        "path": "notifications",
+        "emptyText": "通知はありません",
+        "titlePath": "title",
+        "subtitlePaths": [
+          { "path": "packageName" },
+          { "path": "text", "unit": "json" },
+          { "path": "subText", "unit": "json" }
+        ],
+        "rightPath": "postTime",
+        "rightUnit": "datetime",
+        "footerPath": "isClearable"
+      }
+    },
+    {
+      "key": "usage",
+      "title": "使用状況",
+      "kind": "listCards",
+      "list": {
+        "path": "usage",
+        "emptyText": "使用状況がありません",
+        "titlePath": "packageName",
+        "subtitlePaths": [
+          { "path": "totalTimeInForeground", "unit": "durationMs" },
+          { "path": "lastTimeUsed", "unit": "datetime" }
+        ]
+      }
+    },
+    {
+      "key": "contacts",
+      "title": "連絡先",
+      "kind": "listCards",
+      "list": {
+        "path": "contacts",
+        "emptyText": "連絡先がありません",
+        "titlePath": "displayName",
+        "subtitlePaths": [
+          { "path": "phoneNumbers.length" },
+          { "path": "emails.length" }
+        ],
+        "rightPath": "id"
+      }
+    },
+    {
+      "key": "calendar",
+      "title": "カレンダー",
+      "kind": "listCards",
+      "list": {
+        "path": "calendarEvents",
+        "emptyText": "予定がありません",
+        "titlePath": "title",
+        "subtitlePaths": [
+          { "path": "location" },
+          { "path": "startTime", "unit": "datetime" },
+          { "path": "endTime", "unit": "datetime" }
+        ]
+      }
+    },
+    {
+      "key": "installed-apps",
+      "title": "インストール済みアプリ",
+      "kind": "listCards",
+      "list": {
+        "path": "installedApps",
+        "emptyText": "アプリ情報がありません",
+        "titlePath": "name",
+        "subtitlePaths": [
+          { "path": "packageName" },
+          { "path": "versionName" },
+          { "path": "firstInstallTime", "unit": "datetime" }
+        ],
+        "rightPath": "isSystemApp"
+      }
+    },
+    {
+      "key": "bluetooth",
+      "title": "Bluetooth",
+      "kind": "cards",
+      "items": [
+        { "label": "デバイス数", "path": "bluetoothDevices.length" }
+      ]
+    },
+    {
+      "key": "misc",
+      "title": "その他",
+      "kind": "cards",
+      "items": [
+        { "label": "Location", "path": "location", "unit": "json" },
+        { "label": "Media", "path": "media", "unit": "json" },
+        { "label": "Clipboard", "path": "clipboard", "unit": "json" }
+      ]
+    }
+  ]
+}

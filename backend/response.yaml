@@ -1,0 +1,3203 @@
+openapi: "3.1.0"
+
+info:
+  title: PC API Server
+  version: "0.1.0"
+  description: |
+    ローカルPC の情報取得・操作・Discord RPC を HTTP 経由で行う API サーバー。
+
+    ## 共通仕様
+    - **ベースURL**: `http://localhost:8080`
+    - **CORS**: 全オリジン許可（No-CORS）
+    - **キャッシュ**: GET 系エンドポイントは **1秒間** サーバーサイドでキャッシュされる。
+      操作直後に GET で状態確認する場合は 1 秒以上待つこと。
+    - **エラーレスポンス**: 全エンドポイント共通で `{"error": "メッセージ"}` を返す。
+      HTTP ステータスは 400 / 404 / 500 のいずれか。
+    - **操作系エンドポイント**（POST/DELETE）はキャッシュされない。即時実行される。
+
+servers:
+  - url: http://localhost:8080
+    description: ローカル起動（デフォルト）
+
+# ══════════════════════════════════════════════════
+# 共通スキーマ定義
+# ══════════════════════════════════════════════════
+components:
+  schemas:
+
+    # ── 共通 ──────────────────────────────────────
+    SuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          example: true
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "Not connected to Discord"
+
+    # ── システム情報 ───────────────────────────────
+    OsInfo:
+      type: object
+      required: [os_name, kernel_version, os_version, hostname]
+      properties:
+        os_name:
+          type: string
+          description: OS名
+          example: "Windows 11"
+        kernel_version:
+          type: string
+          description: カーネルバージョン
+          example: "10.0.22631"
+        os_version:
+          type: string
+          description: OSバージョン文字列
+          example: "22H2"
+        hostname:
+          type: string
+          description: ホスト名
+          example: "MY-PC"
+
+    UptimeInfo:
+      type: object
+      required: [uptime_secs, uptime_human]
+      properties:
+        uptime_secs:
+          type: integer
+          format: int64
+          description: 起動からの経過秒数
+          example: 86523
+        uptime_human:
+          type: string
+          description: 人間可読形式
+          example: "1d 0h 2m 3s"
+
+    UserInfo:
+      type: object
+      required: [name, groups]
+      properties:
+        name:
+          type: string
+          example: "alice"
+        groups:
+          type: array
+          items:
+            type: string
+          example: ["users", "wheel"]
+
+    BatteryInfo:
+      type: object
+      required: [percentage, is_charging, state]
+      properties:
+        percentage:
+          type: number
+          format: float
+          description: 残量 0.0〜100.0
+          example: 87.5
+        is_charging:
+          type: boolean
+          example: true
+        state:
+          type: string
+          enum: [Charging, Discharging, Empty, Full, Unknown]
+          example: "Charging"
+        time_to_full:
+          type: integer
+          format: int64
+          nullable: true
+          description: 満充電までの秒数（不明時は null）
+          example: 3600
+        time_to_empty:
+          type: integer
+          format: int64
+          nullable: true
+          description: 空になるまでの秒数（不明時は null）
+          example: null
+
+    # ── ハードウェア ───────────────────────────────
+    CpuCoreInfo:
+      type: object
+      required: [name, usage, frequency_mhz]
+      properties:
+        name:
+          type: string
+          description: コア識別名
+          example: "cpu0"
+        usage:
+          type: number
+          format: float
+          description: 使用率 0.0〜100.0
+          example: 34.2
+        frequency_mhz:
+          type: integer
+          format: int64
+          description: 動作周波数 (MHz)
+          example: 3600
+
+    CpuInfo:
+      type: object
+      required: [brand, physical_cores, logical_cores, global_usage, cores]
+      properties:
+        brand:
+          type: string
+          description: CPUモデル名
+          example: "AMD Ryzen 9 5900X 12-Core Processor"
+        physical_cores:
+          type: integer
+          description: 物理コア数
+          example: 12
+        logical_cores:
+          type: integer
+          description: 論理コア数（スレッド数）
+          example: 24
+        global_usage:
+          type: number
+          format: float
+          description: 全体使用率 0.0〜100.0
+          example: 18.7
+        cores:
+          type: array
+          items:
+            $ref: "#/components/schemas/CpuCoreInfo"
+        temperature_celsius:
+          type: number
+          format: float
+          nullable: true
+          description: CPU温度（℃）。センサーがない場合は null
+          example: 52.0
+
+    MemoryInfo:
+      type: object
+      required: [total_bytes, used_bytes, free_bytes, usage_percent, swap_total_bytes, swap_used_bytes]
+      properties:
+        total_bytes:
+          type: integer
+          format: int64
+          description: 総容量（バイト）
+          example: 34359738368
+        used_bytes:
+          type: integer
+          format: int64
+          description: 使用量（バイト）
+          example: 12884901888
+        free_bytes:
+          type: integer
+          format: int64
+          description: 空き容量（バイト）
+          example: 21474836480
+        usage_percent:
+          type: number
+          format: float
+          description: 使用率 0.0〜100.0
+          example: 37.5
+        swap_total_bytes:
+          type: integer
+          format: int64
+          description: スワップ総容量（バイト）
+          example: 8589934592
+        swap_used_bytes:
+          type: integer
+          format: int64
+          description: スワップ使用量（バイト）
+          example: 0
+
+    DiskInfo:
+      type: object
+      required: [name, mount_point, file_system, total_bytes, available_bytes, used_bytes, usage_percent, is_removable]
+      properties:
+        name:
+          type: string
+          description: ドライブ名
+          example: "C:"
+        mount_point:
+          type: string
+          description: マウントポイント
+          example: "C:\\"
+        file_system:
+          type: string
+          description: ファイルシステム種別
+          example: "NTFS"
+        total_bytes:
+          type: integer
+          format: int64
+          example: 1000204886016
+        available_bytes:
+          type: integer
+          format: int64
+          example: 450000000000
+        used_bytes:
+          type: integer
+          format: int64
+          example: 550204886016
+        usage_percent:
+          type: number
+          format: float
+          description: 使用率 0.0〜100.0
+          example: 55.0
+        is_removable:
+          type: boolean
+          description: リムーバブルメディアかどうか
+          example: false
+
+    NetworkInterfaceInfo:
+      type: object
+      required: [name, mac_address, received_bytes, transmitted_bytes, received_per_sec, transmitted_per_sec]
+      properties:
+        name:
+          type: string
+          description: インターフェース名
+          example: "eth0"
+        local_ip:
+          type: string
+          nullable: true
+          description: ローカルIPアドレス（取得できない場合は null）
+          example: "192.168.1.10"
+        mac_address:
+          type: string
+          description: MACアドレス
+          example: "aa:bb:cc:dd:ee:ff"
+        received_bytes:
+          type: integer
+          format: int64
+          description: 起動来の総受信バイト数
+          example: 1073741824
+        transmitted_bytes:
+          type: integer
+          format: int64
+          description: 起動来の総送信バイト数
+          example: 536870912
+        received_per_sec:
+          type: integer
+          format: int64
+          description: 直近サンプル間の受信バイト数（≒ 受信速度）
+          example: 102400
+        transmitted_per_sec:
+          type: integer
+          format: int64
+          description: 直近サンプル間の送信バイト数（≒ 送信速度）
+          example: 20480
+
+    # ── プロセス ───────────────────────────────────
+    ProcessInfo:
+      type: object
+      required: [pid, name, memory_bytes, virtual_memory_bytes, cpu_usage, status]
+      properties:
+        pid:
+          type: integer
+          format: int32
+          example: 1234
+        name:
+          type: string
+          example: "chrome.exe"
+        memory_bytes:
+          type: integer
+          format: int64
+          description: 実メモリ使用量（バイト）
+          example: 524288000
+        virtual_memory_bytes:
+          type: integer
+          format: int64
+          description: 仮想メモリ使用量（バイト）
+          example: 1073741824
+        cpu_usage:
+          type: number
+          format: float
+          description: CPU使用率 0.0〜100.0
+          example: 3.2
+        status:
+          type: string
+          description: プロセス状態
+          example: "Run"
+        exe:
+          type: string
+          nullable: true
+          description: 実行ファイルのフルパス
+          example: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+
+    # ── ファイル ───────────────────────────────────
+    DirEntry:
+      type: object
+      required: [name, path, is_dir]
+      properties:
+        name:
+          type: string
+          example: "document.txt"
+        path:
+          type: string
+          example: "/home/user/document.txt"
+        is_dir:
+          type: boolean
+          example: false
+        size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: ファイルサイズ（バイト）。ディレクトリの場合は null
+          example: 4096
+        modified:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最終更新日時（RFC 3339）
+          example: "2025-01-15T10:30:00+09:00"
+
+    CommandResult:
+      type: object
+      required: [stdout, stderr, exit_code]
+      properties:
+        stdout:
+          type: string
+          description: 標準出力
+          example: "hello world\n"
+        stderr:
+          type: string
+          description: 標準エラー出力
+          example: ""
+        exit_code:
+          type: integer
+          description: 終了コード。0 が正常終了
+          example: 0
+
+    # ── Discord 共通 ──────────────────────────────
+    DiscordStatus:
+      type: object
+      required: [connected, authenticated]
+      properties:
+        connected:
+          type: boolean
+          description: IPCソケットに接続中かどうか
+          example: true
+        client_id:
+          type: string
+          nullable: true
+          description: 接続時に使用した client_id
+          example: "123456789012345678"
+        authenticated:
+          type: boolean
+          description: access_token 認証済みかどうか
+          example: false
+
+    # RPC ペイロード共通ラッパー（Discord からのレスポンスは常にこの形）
+    DiscordRpcPayload:
+      type: object
+      required: [cmd]
+      properties:
+        cmd:
+          type: string
+          description: RPCコマンド名
+          example: "GET_GUILDS"
+        nonce:
+          type: string
+          description: リクエスト時に送ったnonce（コマンドレスポンスのみ）
+          example: "f48f6176-4afb-4c03-b1b8-d960861f5216"
+        evt:
+          type: string
+          nullable: true
+          description: イベント名（購読イベント・エラー・subscribe/unsubscribeのみ）
+          example: null
+        data:
+          type: object
+          nullable: true
+          description: レスポンスデータ本体
+
+    # ── Discord ユーザー ───────────────────────────
+    DiscordUser:
+      type: object
+      required: [id, username, discriminator]
+      properties:
+        id:
+          type: string
+          description: ユーザーID (snowflake)
+          example: "190320984123768832"
+        username:
+          type: string
+          description: ユーザー名
+          example: "Mason"
+        discriminator:
+          type: string
+          description: 4桁の識別子（新システムでは "0"）
+          example: "0"
+        global_name:
+          type: string
+          nullable: true
+          description: 表示名（グローバル名）
+          example: "Mason"
+        avatar:
+          type: string
+          nullable: true
+          description: アバターハッシュ。画像URLは https://cdn.discordapp.com/avatars/{id}/{avatar}.png
+          example: "a_bab14f271d565501444b2ca3be944b25"
+        bot:
+          type: boolean
+          description: Botアカウントかどうか
+          example: false
+        flags:
+          type: integer
+          description: ユーザーフラグのビットフィールド
+          example: 64
+        premium_type:
+          type: integer
+          description: "Nitroサブスクリプション種別: 0=なし, 1=Classic, 2=Nitro, 3=Basic"
+          example: 2
+
+    # ── Discord READY ──────────────────────────────
+    DiscordReadyData:
+      type: object
+      required: [v, config, user]
+      description: 接続直後に Discord から返される READY ペイロードの data フィールド
+      properties:
+        v:
+          type: integer
+          description: RPCバージョン
+          example: 1
+        config:
+          type: object
+          required: [cdn_host, api_endpoint, environment]
+          description: RPCサーバー設定
+          properties:
+            cdn_host:
+              type: string
+              description: CDNホスト
+              example: "cdn.discordapp.com"
+            api_endpoint:
+              type: string
+              description: APIエンドポイント
+              example: "//discord.com/api"
+            environment:
+              type: string
+              description: 環境名
+              example: "production"
+        user:
+          $ref: "#/components/schemas/DiscordUser"
+
+    # ── Discord OAuth2 Application ─────────────────
+    DiscordOAuth2Application:
+      type: object
+      required: [id, name, description]
+      properties:
+        id:
+          type: string
+          description: アプリケーションID (snowflake)
+          example: "192741864418312192"
+        name:
+          type: string
+          description: アプリケーション名
+          example: "My App"
+        description:
+          type: string
+          description: アプリケーション説明
+          example: "test app description"
+        icon:
+          type: string
+          nullable: true
+          description: アイコンハッシュ
+          example: "d6b51c21c48482d5b64aa4832d92fe14"
+        rpc_origins:
+          type: array
+          description: 許可されたRPCオリジンURL一覧
+          items:
+            type: string
+          example: ["http://localhost:3344"]
+
+    # ── Discord AUTHENTICATE レスポンス ───────────
+    DiscordAuthenticateData:
+      type: object
+      required: [user, scopes, expires, application]
+      properties:
+        user:
+          $ref: "#/components/schemas/DiscordUser"
+        scopes:
+          type: array
+          description: 付与されたOAuth2スコープ一覧
+          items:
+            type: string
+          example: ["rpc", "identify"]
+        expires:
+          type: string
+          format: date-time
+          description: アクセストークンの有効期限
+          example: "2025-06-29T19:09:52.361000+00:00"
+        application:
+          $ref: "#/components/schemas/DiscordOAuth2Application"
+
+    # ── Discord Guild ──────────────────────────────
+    DiscordPartialGuild:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: サーバーID (snowflake)
+          example: "199737254929760256"
+        name:
+          type: string
+          description: サーバー名
+          example: "My Server"
+        icon_url:
+          type: string
+          nullable: true
+          description: サーバーアイコンURL
+          example: null
+
+    DiscordGuild:
+      allOf:
+        - $ref: "#/components/schemas/DiscordPartialGuild"
+      type: object
+      properties:
+        members:
+          type: array
+          description: メンバー一覧（非推奨・常に空配列）
+          items:
+            type: object
+          example: []
+
+    # ── Discord Channel ────────────────────────────
+    DiscordPartialChannel:
+      type: object
+      required: [id, name, type]
+      properties:
+        id:
+          type: string
+          description: チャンネルID (snowflake)
+          example: "199737254929760257"
+        name:
+          type: string
+          description: チャンネル名
+          example: "general"
+        type:
+          type: integer
+          description: |
+            チャンネル種別:
+            - `0`: テキストチャンネル
+            - `1`: DM
+            - `2`: ボイスチャンネル
+            - `3`: グループDM
+          enum: [0, 1, 2, 3]
+          example: 2
+
+    DiscordChannel:
+      type: object
+      required: [id, name, type, guild_id, position]
+      properties:
+        id:
+          type: string
+          example: "199737254929760257"
+        name:
+          type: string
+          example: "General"
+        type:
+          type: integer
+          description: "0=テキスト, 1=DM, 2=ボイス, 3=グループDM"
+          example: 2
+        guild_id:
+          type: string
+          description: 所属サーバーID
+          example: "199737254929760256"
+        topic:
+          type: string
+          nullable: true
+          description: テキストチャンネルのトピック
+          example: null
+        bitrate:
+          type: integer
+          nullable: true
+          description: ボイスチャンネルのビットレート (bps)
+          example: 64000
+        user_limit:
+          type: integer
+          nullable: true
+          description: ボイスチャンネルの最大人数（0=無制限）
+          example: 0
+        position:
+          type: integer
+          description: チャンネルリスト内の位置
+          example: 0
+        voice_states:
+          type: array
+          description: ボイスチャンネルの場合のみ。参加中ユーザーの状態一覧
+          items:
+            $ref: "#/components/schemas/DiscordVoiceStateEntry"
+        messages:
+          type: array
+          description: テキストチャンネルの場合のみ。直近のメッセージ一覧
+          items:
+            $ref: "#/components/schemas/DiscordMessage"
+
+    # ── Discord Voice State ────────────────────────
+    DiscordVoiceState:
+      type: object
+      required: [mute, deaf, self_mute, self_deaf, suppress]
+      description: Discordのボイス状態（サーバー側設定）
+      properties:
+        mute:
+          type: boolean
+          description: サーバーミュートされているか
+          example: false
+        deaf:
+          type: boolean
+          description: サーバーデフにされているか
+          example: false
+        self_mute:
+          type: boolean
+          description: 自分でミュートしているか
+          example: false
+        self_deaf:
+          type: boolean
+          description: 自分でデフにしているか
+          example: false
+        suppress:
+          type: boolean
+          description: 抑制されているか（ステージチャンネル等）
+          example: false
+
+    DiscordVoiceStateEntry:
+      type: object
+      description: ボイスチャンネル内の各ユーザーのエントリ（GET_CHANNELレスポンス内）
+      required: [voice_state, user, mute, volume, pan]
+      properties:
+        voice_state:
+          $ref: "#/components/schemas/DiscordVoiceState"
+        user:
+          $ref: "#/components/schemas/DiscordUser"
+        nick:
+          type: string
+          nullable: true
+          description: サーバーニックネーム
+          example: "test user 2"
+        volume:
+          type: integer
+          description: このユーザーのローカル音量 (0〜200, デフォルト100)
+          example: 110
+        mute:
+          type: boolean
+          description: ローカルミュート状態
+          example: false
+        pan:
+          $ref: "#/components/schemas/PanObject"
+
+    # ── Pan ───────────────────────────────────────
+    PanObject:
+      type: object
+      required: [left, right]
+      description: ステレオパン設定
+      properties:
+        left:
+          type: number
+          format: float
+          description: 左チャンネル 0.0〜1.0
+          example: 1.0
+        right:
+          type: number
+          format: float
+          description: 右チャンネル 0.0〜1.0
+          example: 1.0
+
+    # ── Discord Voice Settings ─────────────────────
+    DiscordShortcutKeyCombo:
+      type: object
+      required: [type, code, name]
+      description: PTTショートカットキー設定
+      properties:
+        type:
+          type: integer
+          description: |
+            キー種別:
+            - `0`: KEYBOARD_KEY（通常キー）
+            - `1`: MOUSE_BUTTON（マウスボタン）
+            - `2`: KEYBOARD_MODIFIER_KEY（修飾キー）
+            - `3`: GAMEPAD_BUTTON（ゲームパッドボタン）
+          enum: [0, 1, 2, 3]
+          example: 0
+        code:
+          type: integer
+          description: キーコード
+          example: 12
+        name:
+          type: string
+          description: キー名
+          example: "i"
+
+    DiscordVoiceDevice:
+      type: object
+      description: オーディオデバイス情報
+      properties:
+        id:
+          type: string
+          description: デバイスID（"default" で既定デバイス）
+          example: "default"
+        name:
+          type: string
+          description: デバイス表示名
+          example: "Default"
+
+    VoiceDeviceObject:
+      type: object
+      description: ボイス入力/出力デバイス設定（SET_VOICE_SETTINGSで使用）
+      properties:
+        device_id:
+          type: string
+          description: デバイスID
+          example: "default"
+        volume:
+          type: number
+          format: float
+          description: "入力: 0〜100 / 出力: 0〜200"
+          example: 90.5
+        available_devices:
+          type: array
+          description: 利用可能なデバイス一覧（読み取り専用、レスポンスのみ）
+          readOnly: true
+          items:
+            $ref: "#/components/schemas/DiscordVoiceDevice"
+
+    VoiceModeObject:
+      type: object
+      description: ボイス検出モード設定
+      properties:
+        type:
+          type: string
+          enum: [VOICE_ACTIVITY, PUSH_TO_TALK]
+          description: "VOICE_ACTIVITY=自動検出, PUSH_TO_TALK=プッシュトゥトーク"
+          example: "VOICE_ACTIVITY"
+        auto_threshold:
+          type: boolean
+          description: VADの閾値を自動設定するか
+          example: true
+        threshold:
+          type: number
+          format: float
+          description: ボイス検出閾値 dB（min: -100.0, max: 0.0）
+          example: -46.9
+        shortcut:
+          type: array
+          description: PTTのショートカットキー設定（PUSH_TO_TALK時に使用）
+          items:
+            $ref: "#/components/schemas/DiscordShortcutKeyCombo"
+        delay:
+          type: number
+          format: float
+          description: PTTリリースディレイ ms（min: 0, max: 2000）
+          example: 98.4
+
+    DiscordVoiceSettings:
+      type: object
+      required: [input, output, mode, automatic_gain_control, echo_cancellation,
+                 noise_suppression, qos, silence_warning, deaf, mute]
+      description: GET_VOICE_SETTINGS / SET_VOICE_SETTINGS のレスポンス data
+      properties:
+        input:
+          allOf:
+            - $ref: "#/components/schemas/VoiceDeviceObject"
+          description: マイク設定（volumeはmin:0, max:100）
+        output:
+          allOf:
+            - $ref: "#/components/schemas/VoiceDeviceObject"
+          description: スピーカー設定（volumeはmin:0, max:200）
+        mode:
+          $ref: "#/components/schemas/VoiceModeObject"
+        automatic_gain_control:
+          type: boolean
+          description: 自動ゲインコントロール
+          example: false
+        echo_cancellation:
+          type: boolean
+          description: エコーキャンセル
+          example: false
+        noise_suppression:
+          type: boolean
+          description: ノイズ抑制
+          example: false
+        qos:
+          type: boolean
+          description: QoS（Quality of Service）
+          example: false
+        silence_warning:
+          type: boolean
+          description: 無音警告通知
+          example: false
+        deaf:
+          type: boolean
+          description: セルフデフ（自分のスピーカーミュート）
+          example: false
+        mute:
+          type: boolean
+          description: セルフミュート（自分のマイクミュート）
+          example: false
+
+    # ── Discord Message ────────────────────────────
+    DiscordMessage:
+      type: object
+      required: [id, content, author, timestamp, type]
+      description: Discordメッセージオブジェクト
+      properties:
+        id:
+          type: string
+          description: メッセージID (snowflake)
+          example: "199743874640379904"
+        content:
+          type: string
+          description: メッセージ本文
+          example: "test"
+        author:
+          $ref: "#/components/schemas/DiscordUser"
+        timestamp:
+          type: string
+          format: date-time
+          description: 送信日時（ISO8601）
+          example: "2016-07-05T04:30:50.776Z"
+        edited_timestamp:
+          type: string
+          format: date-time
+          nullable: true
+          description: 編集日時（未編集はnull）
+          example: null
+        tts:
+          type: boolean
+          description: TTSメッセージか
+          example: false
+        mention_everyone:
+          type: boolean
+          example: false
+        mentions:
+          type: array
+          description: メンションされたユーザー
+          items:
+            $ref: "#/components/schemas/DiscordUser"
+        mention_roles:
+          type: array
+          description: メンションされたロールID
+          items:
+            type: string
+        embeds:
+          type: array
+          description: 埋め込みコンテンツ
+          items:
+            type: object
+        attachments:
+          type: array
+          description: 添付ファイル
+          items:
+            type: object
+        type:
+          type: integer
+          description: メッセージ種別（0=通常メッセージ）
+          example: 0
+        pinned:
+          type: boolean
+          description: ピン留めされているか
+          example: false
+        blocked:
+          type: boolean
+          description: ブロックされたユーザーからのメッセージか
+          example: false
+        author_color:
+          type: string
+          description: 送信者のロールカラー（16進数）
+          example: "#ffffff"
+
+    # ── Discord Activity (Rich Presence) ──────────
+    ActivityTimestamps:
+      type: object
+      properties:
+        start:
+          type: integer
+          format: int64
+          description: 開始時刻（Unixタイムスタンプ 秒）
+          example: 1700000000
+        end:
+          type: integer
+          format: int64
+          nullable: true
+          description: 終了時刻（Unixタイムスタンプ 秒）。省略可
+          example: null
+
+    ActivityAssets:
+      type: object
+      properties:
+        large_image:
+          type: string
+          description: 大きい画像のキー名またはURL
+          example: "game_logo"
+        large_text:
+          type: string
+          nullable: true
+          description: 大きい画像のホバーテキスト
+          example: "Numbani"
+        large_url:
+          type: string
+          nullable: true
+          description: 大きい画像のリンクURL
+          example: "https://example.wiki/maps/Numbani"
+        small_image:
+          type: string
+          nullable: true
+          description: 小さい画像のキー名またはURL
+          example: "hero_icon"
+        small_text:
+          type: string
+          nullable: true
+          description: 小さい画像のホバーテキスト
+          example: "Pharah"
+        small_url:
+          type: string
+          nullable: true
+          description: 小さい画像のリンクURL
+          example: null
+
+    ActivityParty:
+      type: object
+      properties:
+        id:
+          type: string
+          description: パーティID
+          example: "party-abc123"
+        size:
+          type: array
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+          description: "[現在人数, 最大人数]"
+          example: [3, 6]
+
+    ActivitySecrets:
+      type: object
+      properties:
+        join:
+          type: string
+          description: 参加用シークレットトークン（ACTIVITY_JOIN イベントで使用）
+          example: "025ed05c71f639de8bfaa0d679d7c94b2fdce12f"
+        spectate:
+          type: string
+          nullable: true
+          description: 観戦用シークレットトークン（ACTIVITY_SPECTATE イベントで使用）
+          example: "e7eb30d2ee025ed05c71ea495f770b76454ee4e0"
+        match:
+          type: string
+          nullable: true
+          description: マッチ識別用シークレット
+          example: "4b2fdce12f639de8bfa7e3591b71a0d679d7c93f"
+
+    ActivityObject:
+      type: object
+      description: |
+        Discord Rich Presence アクティビティオブジェクト。
+        SET_ACTIVITY では type は Playing(0), Listening(2), Watching(3), Competing(5) のみ使用可。
+      properties:
+        state:
+          type: string
+          nullable: true
+          description: 2行目テキスト（最大128字）。パーティ状態など
+          example: "In a Group"
+        state_url:
+          type: string
+          nullable: true
+          description: stateに紐づくURL
+          example: "https://example.com/groups/..."
+        details:
+          type: string
+          nullable: true
+          description: 1行目テキスト（最大128字）。プレイ内容など
+          example: "Competitive | In a Match"
+        details_url:
+          type: string
+          nullable: true
+          description: detailsに紐づくURL
+          example: "https://example.com/matches/..."
+        timestamps:
+          $ref: "#/components/schemas/ActivityTimestamps"
+        assets:
+          $ref: "#/components/schemas/ActivityAssets"
+        party:
+          $ref: "#/components/schemas/ActivityParty"
+        secrets:
+          $ref: "#/components/schemas/ActivitySecrets"
+        instance:
+          type: boolean
+          description: マッチ中かどうか（trueでAsk to Join/Spectateが有効）
+          example: true
+        type:
+          type: integer
+          description: |
+            アクティビティタイプ:
+            - `0`: Playing
+            - `2`: Listening
+            - `3`: Watching
+            - `5`: Competing
+          enum: [0, 2, 3, 5]
+          example: 0
+        application_id:
+          type: string
+          nullable: true
+          description: アプリケーションID（レスポンス時のみ）
+          example: "192741864418312192"
+        name:
+          type: string
+          nullable: true
+          description: アクティビティ名（レスポンス時のみ）
+          example: "My Game"
+
+    # ── Discord Presence ──────────────────────────
+    DiscordPresence:
+      type: object
+      required: [status]
+      description: ユーザーのプレゼンス（オンライン状態）
+      properties:
+        status:
+          type: string
+          enum: [online, idle, dnd, offline]
+          description: "online=オンライン, idle=離席中, dnd=取り込み中, offline=オフライン"
+          example: "online"
+        activity:
+          $ref: "#/components/schemas/ActivityObject"
+          nullable: true
+          description: 現在のアクティビティ（なければnull）
+
+    # ── Discord Relationship ──────────────────────
+    DiscordRelationship:
+      type: object
+      required: [type, user, presence]
+      properties:
+        type:
+          type: integer
+          description: |
+            リレーションシップ種別:
+            - `0`: NONE（削除された）
+            - `1`: FRIEND（フレンド）
+            - `2`: BLOCKED（ブロック）
+            - `3`: PENDING_INCOMING（受信した申請）
+            - `4`: PENDING_OUTGOING（送信した申請）
+            - `5`: IMPLICIT（共通サーバー在籍、フレンドでない）
+          enum: [0, 1, 2, 3, 4, 5]
+          example: 1
+        user:
+          $ref: "#/components/schemas/DiscordUser"
+        presence:
+          $ref: "#/components/schemas/DiscordPresence"
+
+    # ── Discord Entitlement ───────────────────────
+    DiscordEntitlement:
+      type: object
+      required: [id, sku_id, application_id, user_id, type, deleted]
+      description: エンタイトルメント（購入済みSKU/サブスクリプション）
+      properties:
+        id:
+          type: string
+          description: エンタイトルメントID (snowflake)
+          example: "1019653849998299136"
+        sku_id:
+          type: string
+          description: SKU ID (snowflake)
+          example: "1019475255913222144"
+        application_id:
+          type: string
+          description: アプリケーションID (snowflake)
+          example: "192741864418312192"
+        user_id:
+          type: string
+          description: 所有ユーザーID (snowflake)
+          example: "53908232506183680"
+        type:
+          type: integer
+          description: |
+            エンタイトルメント種別:
+            - `1`: PURCHASE（ユーザー購入）
+            - `2`: PREMIUM_SUBSCRIPTION（Nitroサブスク）
+            - `3`: DEVELOPER_GIFT（開発者ギフト）
+            - `4`: TEST_MODE_PURCHASE（テストモード購入）
+            - `5`: FREE_PURCHASE（無料付与）
+            - `6`: USER_GIFT（ユーザーギフト）
+            - `7`: PREMIUM_PURCHASE（プレミアム機能購入）
+            - `8`: APPLICATION_SUBSCRIPTION（アプリサブスク）
+          enum: [1, 2, 3, 4, 5, 6, 7, 8]
+          example: 8
+        deleted:
+          type: boolean
+          description: 削除済みかどうか
+          example: false
+        starts_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 開始日時（ISO8601）
+          example: "2022-09-14T17:00:18.704163+00:00"
+        ends_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 終了日時（ISO8601）
+          example: "2022-10-14T17:00:18.704163+00:00"
+        guild_id:
+          type: string
+          nullable: true
+          description: 適用サーバーID（サーバーサブスクの場合）
+          example: null
+        consumed:
+          type: boolean
+          nullable: true
+          description: 消費型エンタイトルメントが消費済みかどうか
+          example: null
+
+    # ── Discord Certified Device ──────────────────
+    DiscordVendor:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          description: ベンダー名
+          example: "SteelSeries"
+        url:
+          type: string
+          description: ベンダーURL
+          example: "https://steelseries.com"
+
+    DiscordModel:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          description: モデル名
+          example: "Arctis 7"
+        url:
+          type: string
+          description: モデルURL
+          example: "https://steelseries.com/gaming-headsets/arctis-7"
+
+    DiscordCertifiedDevice:
+      type: object
+      required: [type, id, vendor, model, related]
+      description: SET_CERTIFIED_DEVICES で送信するデバイスオブジェクト
+      properties:
+        type:
+          type: string
+          enum: [audioinput, audiooutput, videoinput]
+          description: "デバイス種別: audioinput=マイク, audiooutput=スピーカー, videoinput=カメラ"
+          example: "audioinput"
+        id:
+          type: string
+          description: デバイスのWindows UUID
+          example: "aafc2003-da0e-42a3-b982-6a17a2812510"
+        vendor:
+          $ref: "#/components/schemas/DiscordVendor"
+        model:
+          $ref: "#/components/schemas/DiscordModel"
+        related:
+          type: array
+          description: 関連デバイスのUUID一覧
+          items:
+            type: string
+          example: ["aafc2003-da0e-42a3-b982-6a17a2819999"]
+        echo_cancellation:
+          type: boolean
+          nullable: true
+          description: ハードウェアのエコーキャンセル（AUDIO_INPUTのみ）
+          example: true
+        noise_suppression:
+          type: boolean
+          nullable: true
+          description: ハードウェアのノイズ抑制（AUDIO_INPUTのみ）
+          example: true
+        automatic_gain_control:
+          type: boolean
+          nullable: true
+          description: ハードウェアのAGC（AUDIO_INPUTのみ）
+          example: true
+        hardware_mute:
+          type: boolean
+          nullable: true
+          description: ハードウェアミュート状態（AUDIO_INPUTのみ）
+          example: false
+
+    # ── Discord GUILD_STATUS イベントデータ ────────
+    DiscordGuildStatusData:
+      type: object
+      required: [guild, online]
+      properties:
+        guild:
+          $ref: "#/components/schemas/DiscordPartialGuild"
+        online:
+          type: integer
+          description: オンライン人数（非推奨・常に0）
+          example: 0
+
+    # ── Discord VOICE_CONNECTION_STATUS データ ─────
+    DiscordVoiceConnectionStatusData:
+      type: object
+      required: [state, hostname, pings, average_ping, last_ping]
+      properties:
+        state:
+          type: string
+          enum:
+            - DISCONNECTED
+            - AWAITING_ENDPOINT
+            - AUTHENTICATING
+            - CONNECTING
+            - CONNECTED
+            - VOICE_DISCONNECTED
+            - VOICE_CONNECTING
+            - VOICE_CONNECTED
+            - NO_ROUTE
+            - ICE_CHECKING
+          description: |
+            ボイス接続状態:
+            - `DISCONNECTED`: TCP切断
+            - `AWAITING_ENDPOINT`: エンドポイント待機中
+            - `AUTHENTICATING`: TCP認証中
+            - `CONNECTING`: TCP接続中
+            - `CONNECTED`: TCP接続済み
+            - `VOICE_DISCONNECTED`: TCP接続済み・音声切断
+            - `VOICE_CONNECTING`: TCP接続済み・音声接続中
+            - `VOICE_CONNECTED`: TCP接続済み・音声接続済み
+            - `NO_ROUTE`: ルートなし
+            - `ICE_CHECKING`: WebRTC ICE確認中
+          example: "VOICE_CONNECTED"
+        hostname:
+          type: string
+          description: 接続中ボイスサーバーのホスト名
+          example: "some-server.discord.gg"
+        pings:
+          type: array
+          description: 直近20件のpings (ms)
+          items:
+            type: number
+            format: float
+          example: [20, 13.37]
+        average_ping:
+          type: number
+          format: float
+          description: 平均ping (ms)
+          example: 13.37
+        last_ping:
+          type: number
+          format: float
+          description: 最後のping (ms)
+          example: 20
+
+    # ── Discord NOTIFICATION_CREATE データ ─────────
+    DiscordNotificationData:
+      type: object
+      required: [channel_id, message, icon_url, title, body]
+      properties:
+        channel_id:
+          type: string
+          description: 通知が発生したチャンネルID
+          example: "199737254929760256"
+        message:
+          $ref: "#/components/schemas/DiscordMessage"
+        icon_url:
+          type: string
+          description: 通知アイコンURL
+          example: "https://cdn.discordapp.com/avatars/155607406007681024/8ab559b8286e48270c04471ae382cd9d.jpg"
+        title:
+          type: string
+          description: 通知タイトル
+          example: "username (#general)"
+        body:
+          type: string
+          description: 通知本文
+          example: "test message"
+
+    # ── Discord ACTIVITY_INVITE データ ────────────
+    DiscordActivityInviteData:
+      type: object
+      required: [type, user, activity, channel_id, message_id]
+      properties:
+        type:
+          type: integer
+          description: 招待種別（1=参加）
+          example: 1
+        user:
+          $ref: "#/components/schemas/DiscordUser"
+        activity:
+          $ref: "#/components/schemas/ActivityObject"
+        channel_id:
+          type: string
+          description: 招待が送られたチャンネルID
+          example: "199737254929760256"
+        message_id:
+          type: string
+          description: 招待メッセージID
+          example: "199743874640379904"
+
+    # ── Discord CURRENT_USER_UPDATE データ ─────────
+    DiscordCurrentUserData:
+      type: object
+      required: [id, username, discriminator, bot]
+      properties:
+        id:
+          type: string
+          example: "53908232506183680"
+        username:
+          type: string
+          example: "Mason"
+        discriminator:
+          type: string
+          example: "0"
+        global_name:
+          type: string
+          nullable: true
+          example: "Mason"
+        avatar:
+          type: string
+          nullable: true
+          example: "a_bab14f271d565501444b2ca3be944b25"
+        avatar_decoration_data:
+          type: object
+          nullable: true
+          description: アバターデコレーションデータ（なければnull）
+          example: null
+        bot:
+          type: boolean
+          example: false
+        flags:
+          type: integer
+          description: ユーザーフラグのビットフィールド
+          example: 64
+        premium_type:
+          type: integer
+          description: "0=なし, 1=Classic, 2=Nitro, 3=Basic"
+          example: 2
+
+# ══════════════════════════════════════════════════
+# パス定義
+# ══════════════════════════════════════════════════
+paths:
+
+  # ────────────────────────────────────────────────
+  # システム情報
+  # ────────────────────────────────────────────────
+
+  /system:
+    get:
+      tags: [System]
+      summary: システム全情報まとめ取得
+      description: OS情報・稼働時間・ユーザー・バッテリーを一括取得する。**1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [os, uptime, users, battery]
+                properties:
+                  os:
+                    $ref: "#/components/schemas/OsInfo"
+                  uptime:
+                    $ref: "#/components/schemas/UptimeInfo"
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UserInfo"
+                  battery:
+                    type: array
+                    description: バッテリーなし（デスクトップ等）の場合は空配列
+                    items:
+                      $ref: "#/components/schemas/BatteryInfo"
+
+  /system/os:
+    get:
+      tags: [System]
+      summary: OS情報取得
+      description: OS名・カーネルバージョン・ビルド番号・ホスト名。**1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OsInfo"
+
+  /system/uptime:
+    get:
+      tags: [System]
+      summary: 稼働時間取得
+      description: PC起動からの経過時間。**1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UptimeInfo"
+
+  /system/users:
+    get:
+      tags: [System]
+      summary: ログインユーザー一覧取得
+      description: 現在ログイン中のユーザー一覧。**1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserInfo"
+
+  /system/battery:
+    get:
+      tags: [System]
+      summary: バッテリー状態取得
+      description: |
+        バッテリー残量・充電状態を返す。
+        デスクトップPCやバッテリーなし環境では空配列が返る。
+        **1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功（バッテリーなし環境では空配列）
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BatteryInfo"
+
+  # ────────────────────────────────────────────────
+  # ハードウェア
+  # ────────────────────────────────────────────────
+
+  /hardware/cpu:
+    get:
+      tags: [Hardware]
+      summary: CPU情報取得
+      description: |
+        CPUモデル・コア数・全体/コアごとの使用率・動作周波数・温度を返す。
+        温度はサーマルセンサーが存在しない場合 null になる。
+        **1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CpuInfo"
+
+  /hardware/memory:
+    get:
+      tags: [Hardware]
+      summary: メモリ情報取得
+      description: RAM・スワップの容量・使用量・使用率。**1秒キャッシュ**。単位はバイト。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryInfo"
+
+  /hardware/disks:
+    get:
+      tags: [Hardware]
+      summary: ディスク一覧取得
+      description: |
+        マウントされている全ドライブの容量・空き容量・使用率を返す。
+        単位はバイト。**1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DiskInfo"
+
+  /hardware/network:
+    get:
+      tags: [Hardware]
+      summary: ネットワークインターフェース情報取得
+      description: |
+        インターフェースごとの IP・MAC・送受信バイト数を返す。
+        `received_per_sec` / `transmitted_per_sec` は直近サンプル間の差分であり
+        おおよその現在速度として利用できる。**1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NetworkInterfaceInfo"
+
+  # ────────────────────────────────────────────────
+  # プロセス
+  # ────────────────────────────────────────────────
+
+  /processes:
+    get:
+      tags: [Processes]
+      summary: プロセス一覧取得
+      description: |
+        実行中の全プロセスを返す。数百〜数千件になる場合がある。
+        **1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProcessInfo"
+
+    delete:
+      tags: [Processes]
+      summary: プロセス終了
+      description: |
+        PID またはプロセス名でプロセスを強制終了する（SIGKILL / taskkill /F）。
+        **⚠️ システムプロセスを終了するとOSが不安定になる可能性がある。**
+        `pid` と `name` はどちらか一方を必ず指定する。
+      parameters:
+        - name: pid
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          description: 終了対象のプロセスID
+          example: 1234
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 終了対象のプロセス名（完全一致）
+          example: "notepad.exe"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      pid:
+                        type: integer
+                        example: 1234
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      name:
+                        type: string
+                        example: "notepad.exe"
+        "400":
+          description: pid も name も指定されていない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 終了失敗
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /processes/startup:
+    get:
+      tags: [Processes]
+      summary: スタートアッププログラム一覧取得
+      description: |
+        自動起動登録されているプログラムの一覧を返す。
+        OS によって取得元が異なる。
+        - Windows: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+        - Linux: `/etc/xdg/autostart` および `~/.config/autostart` の .desktop ファイル名
+        - macOS: `~/Library/LaunchAgents` 等の plist ファイルパス
+
+        **1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example:
+                  - "OneDrive: C:\\...\\OneDrive.exe"
+                  - "Discord: C:\\...\\Discord.exe"
+
+  /processes/active-window:
+    get:
+      tags: [Processes]
+      summary: アクティブウィンドウタイトル取得
+      description: |
+        現在最前面にあるウィンドウのタイトルを返す。
+        - Linux では `xdotool` が必要。インストールされていない場合は null。
+        **1秒キャッシュ**。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [title]
+                properties:
+                  title:
+                    type: string
+                    nullable: true
+                    example: "Visual Studio Code"
+
+  # ────────────────────────────────────────────────
+  # 電源・システム操作
+  # ────────────────────────────────────────────────
+
+  /control/shutdown:
+    post:
+      tags: [Control]
+      summary: シャットダウン
+      description: |
+        **⚠️ 取り消し不可。即時実行される。**
+        未保存データは失われる可能性がある。
+      requestBody:
+        required: false
+      responses:
+        "200":
+          description: コマンド送信成功（実際のシャットダウンはOSが処理）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /control/reboot:
+    post:
+      tags: [Control]
+      summary: 再起動
+      description: |
+        **⚠️ 取り消し不可。即時実行される。**
+        未保存データは失われる可能性がある。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /control/sleep:
+    post:
+      tags: [Control]
+      summary: スリープ
+      description: システムをスリープ（サスペンド）状態に移行する。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /control/lock:
+    post:
+      tags: [Control]
+      summary: 画面ロック
+      description: 現在のセッションを維持したまま画面をロックする。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /control/logout:
+    post:
+      tags: [Control]
+      summary: ログアウト
+      description: |
+        **⚠️ 現在のユーザーセッションを終了する。**
+        未保存データは失われる可能性がある。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /control/execute:
+    post:
+      tags: [Control]
+      summary: シェルコマンド実行
+      description: |
+        **⚠️ 任意のコマンドをシステム上で実行する。最も危険な操作。**
+        - Windows: PowerShell で実行
+        - Linux/macOS: `/bin/sh -c` で実行
+
+        stdout・stderr・終了コードを返す。
+        終了コード 0 が正常。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: string
+                  description: 実行するコマンド文字列
+                  example: "echo hello"
+      responses:
+        "200":
+          description: コマンド実行完了（終了コードが 0 以外でも 200 を返す）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandResult"
+        "500":
+          description: コマンド起動失敗
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /control/launch:
+    post:
+      tags: [Control]
+      summary: アプリ起動
+      description: |
+        指定パスのアプリケーションをバックグラウンドで起動する。
+        - Windows: `start` コマンド経由
+        - Linux: `xdg-open` 経由
+        - macOS: `open` 経由
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  description: 実行ファイルのフルパス、または URI スキーム
+                  example: "C:\\Windows\\notepad.exe"
+      responses:
+        "200":
+          description: 起動コマンド送信成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ────────────────────────────────────────────────
+  # 入力操作
+  # ────────────────────────────────────────────────
+
+  /input/mouse/move:
+    post:
+      tags: [Input]
+      summary: マウスカーソル移動
+      description: |
+        マウスカーソルを指定座標に移動する。
+        座標系は画面左上が原点 (0, 0)。
+        `absolute: true`（デフォルト）で絶対座標、`false` で相対移動。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [x, y]
+              properties:
+                x:
+                  type: integer
+                  description: X座標（ピクセル）
+                  example: 960
+                y:
+                  type: integer
+                  description: Y座標（ピクセル）
+                  example: 540
+                absolute:
+                  type: boolean
+                  default: true
+                  description: true=絶対座標、false=現在位置からの相対移動
+                  example: true
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /input/mouse/click:
+    post:
+      tags: [Input]
+      summary: マウスクリック
+      description: |
+        指定ボタンでクリックする。
+        `x` と `y` を指定した場合、その座標に移動してからクリックする。
+        省略した場合は現在のカーソル位置でクリックする。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [button]
+              properties:
+                button:
+                  type: string
+                  enum: [left, right, middle]
+                  description: クリックするボタン
+                  example: "left"
+                x:
+                  type: integer
+                  nullable: true
+                  description: クリック前に移動する X 座標（省略可）
+                  example: 100
+                y:
+                  type: integer
+                  nullable: true
+                  description: クリック前に移動する Y 座標（省略可）
+                  example: 200
+                double:
+                  type: boolean
+                  default: false
+                  description: true でダブルクリック
+                  example: false
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /input/mouse/scroll:
+    post:
+      tags: [Input]
+      summary: マウスホイールスクロール
+      description: |
+        マウスホイールをスクロールさせる。
+        `y` に正の値でスクロールダウン、負の値でスクロールアップ。
+        現在の実装では `y` 値を垂直スクロール量として使用する。
+        `x` フィールドは将来の水平スクロール拡張用に予約。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [x, y]
+              properties:
+                x:
+                  type: integer
+                  description: 水平スクロール量（現在は未使用）
+                  example: 0
+                y:
+                  type: integer
+                  description: 垂直スクロール量（正=下、負=上）
+                  example: 3
+                axis:
+                  type: string
+                  enum: [vertical, horizontal]
+                  default: vertical
+                  description: スクロール軸（現在は常に垂直）
+                  example: "vertical"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /input/keyboard/type:
+    post:
+      tags: [Input]
+      summary: テキスト入力
+      description: |
+        現在フォーカスのある入力欄にテキストを送信する。
+        日本語等のマルチバイト文字も送信可能（OSのIME依存）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: 入力するテキスト
+                  example: "Hello, World!"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /input/keyboard/shortcut:
+    post:
+      tags: [Input]
+      summary: キーボードショートカット実行
+      description: |
+        複数キーを同時押しするショートカットを実行する。
+        配列の順番に Press し、逆順に Release する。
+
+        **使用可能なキー名:**
+        修飾キー: `ctrl` (= `control`), `alt`, `shift`, `super` (= `win` = `meta`)
+        特殊キー: `tab`, `enter` (= `return`), `escape` (= `esc`), `space`,
+          `backspace`, `delete` (= `del`), `home`, `end`, `pageup`, `pagedown`
+        矢印キー: `up`, `down`, `left`, `right`
+        ファンクションキー: `f1` 〜 `f12`
+        1文字キー: `a`〜`z`, `0`〜`9`, 記号など（1文字の文字列）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keys]
+              properties:
+                keys:
+                  type: array
+                  items:
+                    type: string
+                  description: 同時押しするキー名の配列
+                  example: ["ctrl", "s"]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: 有効なキーが1つも解釈できなかった
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /input/media:
+    post:
+      tags: [Input]
+      summary: メディアキー操作
+      description: 音量・再生コントロール等のメディアキーを送信する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - volume_up
+                    - volume_down
+                    - mute
+                    - play_pause
+                    - next
+                    - prev
+                  description: |
+                    - `volume_up`: 音量を上げる
+                    - `volume_down`: 音量を下げる
+                    - `mute`: ミュート切り替え
+                    - `play_pause`: 再生/一時停止切り替え
+                    - `next`: 次のトラック
+                    - `prev`: 前のトラック
+                  example: "play_pause"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: 不明な action 値
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ────────────────────────────────────────────────
+  # ファイル管理
+  # ────────────────────────────────────────────────
+
+  /files/list:
+    get:
+      tags: [Files]
+      summary: ディレクトリ一覧取得
+      description: 指定パスのディレクトリ内エントリ（ファイル・フォルダ）一覧を返す。
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 一覧を取得するディレクトリの絶対パス
+          example: "/home/user/Documents"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DirEntry"
+        "400":
+          description: パスがディレクトリでない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: パスが存在しない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/move:
+    post:
+      tags: [Files]
+      summary: ファイル/ディレクトリ移動
+      description: ファイルまたはディレクトリを別の場所に移動する（名前変更も可）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [src, dst]
+              properties:
+                src:
+                  type: string
+                  description: 移動元の絶対パス
+                  example: "/home/user/old.txt"
+                dst:
+                  type: string
+                  description: 移動先の絶対パス
+                  example: "/home/user/Documents/new.txt"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/copy:
+    post:
+      tags: [Files]
+      summary: ファイルコピー
+      description: ファイルを別の場所にコピーする。ディレクトリのコピーは非対応。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [src, dst]
+              properties:
+                src:
+                  type: string
+                  description: コピー元の絶対パス
+                  example: "/home/user/original.txt"
+                dst:
+                  type: string
+                  description: コピー先の絶対パス
+                  example: "/home/user/copy.txt"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files:
+    delete:
+      tags: [Files]
+      summary: ファイル/ディレクトリ削除
+      description: |
+        **⚠️ 削除は取り消し不可。ゴミ箱には移動されない。**
+        ディレクトリの場合は再帰的に削除される。
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 削除する絶対パス
+          example: "/home/user/unwanted.txt"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/rename:
+    post:
+      tags: [Files]
+      summary: ファイル名変更
+      description: ファイルまたはディレクトリの名前を変更する。同一ディレクトリ内での改名のみ対応。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [src, new_name]
+              properties:
+                src:
+                  type: string
+                  description: 名前変更対象の絶対パス
+                  example: "/home/user/old_name.txt"
+                new_name:
+                  type: string
+                  description: 新しいファイル名（パスではなくファイル名のみ）
+                  example: "new_name.txt"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, new_path]
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  new_path:
+                    type: string
+                    description: 変更後のフルパス
+                    example: "/home/user/new_name.txt"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/upload:
+    post:
+      tags: [Files]
+      summary: ファイルアップロード
+      description: |
+        `multipart/form-data` 形式でファイルをサーバーにアップロードする。
+        **Content-Type は `application/json` ではなく `multipart/form-data` を使うこと。**
+        フォームフィールド名は `file`。複数ファイルを一度に送信可能。
+        `path` クエリパラメータで保存先ディレクトリを指定する（存在しない場合は自動作成）。
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 保存先ディレクトリの絶対パス
+          example: "/home/user/uploads"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: アップロードするファイル（複数可）
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [saved]
+                properties:
+                  saved:
+                    type: array
+                    items:
+                      type: string
+                    description: 保存されたファイルのフルパス一覧
+                    example: ["/home/user/uploads/photo.jpg"]
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/download:
+    get:
+      tags: [Files]
+      summary: ファイルダウンロード
+      description: |
+        指定パスのファイルをバイナリでダウンロードする。
+        **レスポンスは JSON ではなく `application/octet-stream`（バイナリ）。**
+        `Content-Disposition: attachment; filename="..."` ヘッダーが付与される。
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: ダウンロードするファイルの絶対パス
+          example: "/home/user/document.pdf"
+      responses:
+        "200":
+          description: ファイルバイナリ
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: 'attachment; filename="document.pdf"'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ────────────────────────────────────────────────
+  # ユーティリティ
+  # ────────────────────────────────────────────────
+
+  /utils/screenshot:
+    get:
+      tags: [Utils]
+      summary: スクリーンショット取得
+      description: |
+        プライマリスクリーンのスクリーンショットを PNG 形式で取得する。
+        画像は Base64 エンコードされた文字列として返される。
+        画像を保存・表示するには Base64 デコードが必要。
+        **キャッシュされない（毎回新しい画像を取得）。**
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [format, base64, width, height]
+                properties:
+                  format:
+                    type: string
+                    enum: [png]
+                    example: "png"
+                  base64:
+                    type: string
+                    description: PNG画像のBase64エンコード文字列（data:URL プレフィックスなし）
+                    example: "iVBORw0KGgoAAAANSUhEUgAA..."
+                  width:
+                    type: integer
+                    description: 画像幅（ピクセル）
+                    example: 1920
+                  height:
+                    type: integer
+                    description: 画像高さ（ピクセル）
+                    example: 1080
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /utils/clipboard:
+    get:
+      tags: [Utils]
+      summary: クリップボード読み取り
+      description: クリップボードに現在コピーされているテキストを返す。テキスト以外のデータ（画像等）は取得できない。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text]
+                properties:
+                  text:
+                    type: string
+                    description: クリップボードのテキスト内容
+                    example: "コピーされたテキスト"
+        "500":
+          description: クリップボードへのアクセス失敗
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      tags: [Utils]
+      summary: クリップボード書き込み
+      description: 指定したテキストをクリップボードに書き込む。既存のクリップボード内容は上書きされる。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: クリップボードに書き込むテキスト
+                  example: "コピーするテキスト"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /utils/notify:
+    post:
+      tags: [Utils]
+      summary: デスクトップ通知送信
+      description: |
+        OS のネイティブデスクトップ通知（トースト通知）を表示する。
+        `notifications` feature が無効の場合は `success: false` が返る。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, body]
+              properties:
+                title:
+                  type: string
+                  description: 通知タイトル
+                  example: "タスク完了"
+                body:
+                  type: string
+                  description: 通知本文
+                  example: "ファイルのダウンロードが完了しました。"
+                icon:
+                  type: string
+                  nullable: true
+                  description: アイコン名またはファイルパス（省略可）
+                  example: "dialog-information"
+      responses:
+        "200":
+          description: 成功（または通知機能が無効）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: false
+                      reason:
+                        type: string
+                        example: "notifications feature not enabled"
+
+  # ────────────────────────────────────────────────
+  # Discord RPC
+  # ────────────────────────────────────────────────
+
+  /discord/status:
+    get:
+      tags: [Discord]
+      summary: Discord接続状態確認
+      description: IPC 接続中か、認証済みかを確認する。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscordStatus"
+
+  /discord/guilds:
+    get:
+      tags: [Discord]
+      summary: 参加サーバー一覧取得
+      description: |
+        ユーザーが参加している Discord サーバーの一覧を返す。
+        **前提: 認証済みであること (`guilds` スコープが必要)。**
+      responses:
+        "200":
+          description: 成功。Discord GET_GUILDS レスポンス
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "GET_GUILDS"
+                  nonce:
+                    type: string
+                    example: "e16fcbed-8bfa-4fd4-ba09-73b72e809833"
+                  data:
+                    type: object
+                    required: [guilds]
+                    properties:
+                      guilds:
+                        type: array
+                        description: ユーザーが参加しているサーバー一覧（partial）
+                        items:
+                          $ref: "#/components/schemas/DiscordPartialGuild"
+    get:
+      tags: [Discord]
+      summary: サーバー詳細取得
+      description: 指定した Discord サーバーの詳細情報を返す。
+      parameters:
+        - name: guild_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "987654321098765432"
+        - name: timeout
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: タイムアウト (ms)
+          example: 5000
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "GET_GUILD"
+                  nonce:
+                    type: string
+                    example: "9524922c-3d32-413a-bdaa-0804f4332588"
+                  data:
+                    $ref: "#/components/schemas/DiscordGuild"
+
+  /discord/guilds/{guild_id}/channels:
+    get:
+      tags: [Discord]
+      summary: サーバーのチャンネル一覧取得
+      parameters:
+        - name: guild_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "987654321098765432"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "GET_CHANNELS"
+                  nonce:
+                    type: string
+                    example: "0dee7bd4-8f62-4ecc-9e0f-1b1839a4fa93"
+                  data:
+                    type: object
+                    required: [channels]
+                    properties:
+                      channels:
+                        type: array
+                        description: サーバー内チャンネル一覧（partial）
+                        items:
+                          $ref: "#/components/schemas/DiscordPartialChannel"
+
+  /discord/channels/{channel_id}:
+    get:
+      tags: [Discord]
+      summary: チャンネル詳細取得
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "111222333444555666"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "GET_CHANNEL"
+                  nonce:
+                    type: string
+                    example: "f682697e-d257-4a17-ac0a-7e4b84e66663"
+                  data:
+                    $ref: "#/components/schemas/DiscordChannel"
+
+  /discord/voice/settings:
+    get:
+      tags: [Discord]
+      summary: ボイス設定取得
+      description: |
+        現在のボイス設定（入出力デバイス・音量・エコーキャンセル等）を取得する。
+        **前提: `rpc.voice.read` スコープで認証済みであること。**
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "GET_VOICE_SETTINGS"
+                  data:
+                    $ref: "#/components/schemas/DiscordVoiceSettings"
+
+    post:
+      description: |
+        ボイス設定を変更する。省略したフィールドは変更されない。
+        **前提: `rpc.voice.write` スコープで認証済みであること。**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  $ref: "#/components/schemas/VoiceDeviceObject"
+                  description: マイク設定
+                output:
+                  $ref: "#/components/schemas/VoiceDeviceObject"
+                  description: スピーカー設定
+                mode:
+                  $ref: "#/components/schemas/VoiceModeObject"
+                  description: VAD/PTT 設定
+                automatic_gain_control:
+                  type: boolean
+                  description: 自動ゲインコントロール
+                echo_cancellation:
+                  type: boolean
+                  description: エコーキャンセル
+                noise_suppression:
+                  type: boolean
+                  description: ノイズ抑制
+                qos:
+                  type: boolean
+                  description: QoS（サービス品質）
+                silence_warning:
+                  type: boolean
+                  description: 無音警告
+                deaf:
+                  type: boolean
+                  description: スピーカーミュート（耳栓）
+                mute:
+                  type: boolean
+                  description: マイクミュート
+      responses:
+        "200":
+          description: 成功。変更後の完全なボイス設定を返す
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "SET_VOICE_SETTINGS"
+                  data:
+                    $ref: "#/components/schemas/DiscordVoiceSettings"
+
+  /discord/voice/channel:
+    get:
+      tags: [Discord]
+      summary: 現在のボイスチャンネル取得
+      description: |
+        ユーザーが現在参加しているボイスチャンネルの情報を返す。
+        参加していない場合は `data` が null になる。
+      responses:
+        "200":
+          description: 成功。未参加の場合は data が null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd]
+                properties:
+                  cmd:
+                    type: string
+                    example: "GET_SELECTED_VOICE_CHANNEL"
+                  data:
+                    nullable: true
+                    description: 参加中のチャンネル情報。未参加なら null
+                    allOf:
+                      - $ref: "#/components/schemas/DiscordChannel"
+
+    post:
+      description: |
+        指定したボイスチャンネルに参加する。
+        `channel_id` を null にすると現在のチャンネルから退出する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel_id:
+                  type: string
+                  nullable: true
+                  description: 参加するチャンネルID。null で退出
+                  example: "111222333444555666"
+                timeout:
+                  type: integer
+                  format: int64
+                  description: タイムアウト (ms)
+                  example: 5000
+                force:
+                  type: boolean
+                  description: 強制的に移動する
+                  example: false
+                navigate:
+                  type: boolean
+                  description: Discord UI でチャンネルに移動する
+                  example: true
+      responses:
+        "200":
+          description: 成功。参加後のチャンネル情報、退出時は null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd]
+                properties:
+                  cmd:
+                    type: string
+                    example: "SELECT_VOICE_CHANNEL"
+                  data:
+                    nullable: true
+                    description: 参加したチャンネル情報。退出（channel_id=null）時は null
+                    allOf:
+                      - $ref: "#/components/schemas/DiscordChannel"
+
+  /discord/text/channel:
+    post:
+      tags: [Discord]
+      summary: テキストチャンネル選択
+      description: Discord UI で指定のテキストチャンネルを表示する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_id]
+              properties:
+                channel_id:
+                  type: string
+                  example: "111222333444555666"
+                timeout:
+                  type: integer
+                  format: int64
+                  example: 5000
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd]
+                properties:
+                  cmd:
+                    type: string
+                    example: "SELECT_TEXT_CHANNEL"
+                  data:
+                    nullable: true
+                    description: 選択したチャンネル情報
+                    allOf:
+                      - $ref: "#/components/schemas/DiscordChannel"
+
+  /discord/voice/user-settings:
+    post:
+      tags: [Discord]
+      summary: ユーザーごとのボイス設定変更
+      description: |
+        ボイスチャンネル内の特定ユーザーの音量・ミュート・パンを変更する。
+        `volume` は 0〜200（100 がデフォルト）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  description: 設定対象のユーザーID
+                  example: "555666777888999000"
+                volume:
+                  type: integer
+                  nullable: true
+                  description: 音量 0〜200（100 = 等倍）
+                  example: 80
+                mute:
+                  type: boolean
+                  nullable: true
+                  description: ローカルミュート
+                  example: false
+                pan:
+                  $ref: "#/components/schemas/PanObject"
+                  nullable: true
+      responses:
+        "200":
+          description: 成功。変更後の設定をそのまま返す
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "SET_USER_VOICE_SETTINGS"
+                  data:
+                    type: object
+                    required: [user_id]
+                    properties:
+                      user_id:
+                        type: string
+                        example: "555666777888999000"
+                      volume:
+                        type: integer
+                        description: 設定後の音量 0〜200
+                        example: 80
+                      mute:
+                        type: boolean
+                        example: false
+                      pan:
+                        $ref: "#/components/schemas/PanObject"
+
+  /discord/activity:
+    post:
+      tags: [Discord]
+      summary: Rich Presence (Activity) 更新
+      description: |
+        Discord の Rich Presence（ゲームアクティビティ表示）を更新する。
+        **前提: `rpc.activities.write` スコープで認証済みであること。**
+        `pid` は省略すると本サーバープロセスの PID が使用される。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [activity]
+              properties:
+                pid:
+                  type: integer
+                  nullable: true
+                  description: アクティビティを紐付けるプロセスID（省略時は本サーバーのPID）
+                  example: 1234
+                activity:
+                  $ref: "#/components/schemas/ActivityObject"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "SET_ACTIVITY"
+                  data:
+                    $ref: "#/components/schemas/ActivityObject"
+
+  /discord/activity/join-invite:
+    post:
+      tags: [Discord]
+      summary: 参加招待を承諾
+      description: 他ユーザーから届いた Activity Join 招待を承諾する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  description: 招待を送ってきたユーザーのID
+                  example: "555666777888999000"
+      responses:
+        "200":
+          description: 成功（Discord から null データが返る）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cmd:
+                    type: string
+                    example: "SEND_ACTIVITY_JOIN_INVITE"
+                  data:
+                    nullable: true
+                    example: null
+
+  /discord/activity/close-request:
+    post:
+      tags: [Discord]
+      summary: 参加リクエストを拒否
+      description: 他ユーザーからの Activity Join リクエストを拒否する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  description: リクエストを送ってきたユーザーのID
+                  example: "555666777888999000"
+      responses:
+        "200":
+          description: 成功（Discord から null データが返る）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cmd:
+                    type: string
+                    example: "CLOSE_ACTIVITY_REQUEST"
+                  data:
+                    nullable: true
+                    example: null
+
+  /discord/subscribe:
+    post:
+      tags: [Discord]
+      summary: Discord イベント購読
+      description: |
+        Discord RPC イベントの購読を開始する。
+        購読後、Discord からそのイベントが発生すると IPC で通知が届く
+        （現在この API サーバーはイベントをプッシュしないため、
+        ポーリングや WebSocket 拡張が別途必要）。
+
+        **購読可能なイベント一覧:**
+        | イベント名 | 必要な args |
+        |---|---|
+        | `GUILD_STATUS` | `{"guild_id": "..."}` |
+        | `GUILD_CREATE` | なし |
+        | `CHANNEL_CREATE` | なし |
+        | `VOICE_CHANNEL_SELECT` | なし |
+        | `VOICE_STATE_CREATE` | `{"channel_id": "..."}` |
+        | `VOICE_STATE_UPDATE` | `{"channel_id": "..."}` |
+        | `VOICE_STATE_DELETE` | `{"channel_id": "..."}` |
+        | `VOICE_SETTINGS_UPDATE` | なし |
+        | `VOICE_CONNECTION_STATUS` | なし |
+        | `SPEAKING_START` | `{"channel_id": "..."}` |
+        | `SPEAKING_STOP` | `{"channel_id": "..."}` |
+        | `MESSAGE_CREATE` | `{"channel_id": "..."}` |
+        | `MESSAGE_UPDATE` | `{"channel_id": "..."}` |
+        | `MESSAGE_DELETE` | `{"channel_id": "..."}` |
+        | `NOTIFICATION_CREATE` | なし |
+        | `ACTIVITY_JOIN` | なし |
+        | `ACTIVITY_SPECTATE` | なし |
+        | `ACTIVITY_JOIN_REQUEST` | なし |
+        | `ACTIVITY_INVITE` | なし |
+        | `CURRENT_USER_UPDATE` | なし |
+        | `RELATIONSHIP_UPDATE` | なし |
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [evt]
+              properties:
+                evt:
+                  type: string
+                  description: 購読するイベント名
+                  example: "SPEAKING_START"
+                args:
+                  type: object
+                  nullable: true
+                  description: イベントに応じた追加引数（イベントが channel_id 等を必要とする場合）
+                  example:
+                    channel_id: "111222333444555666"
+      responses:
+        "200":
+          description: 購読成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "SUBSCRIBE"
+                  evt:
+                    type: string
+                    description: 購読したイベント名
+                    example: "SPEAKING_START"
+                  data:
+                    type: object
+                    required: [evt]
+                    properties:
+                      evt:
+                        type: string
+                        description: 購読が確定したイベント名
+                        example: "SPEAKING_START"
+
+  /discord/unsubscribe:
+    post:
+      tags: [Discord]
+      summary: Discord イベント購読解除
+      description: 購読済みイベントの購読を解除する。リクエスト形式は `/discord/subscribe` と同じ。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [evt]
+              properties:
+                evt:
+                  type: string
+                  example: "SPEAKING_START"
+                args:
+                  type: object
+                  nullable: true
+                  example:
+                    channel_id: "111222333444555666"
+      responses:
+        "200":
+          description: 解除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cmd, data]
+                properties:
+                  cmd:
+                    type: string
+                    example: "UNSUBSCRIBE"
+                  evt:
+                    type: string
+                    description: 解除したイベント名
+                    example: "SPEAKING_START"
+                  data:
+                    type: object
+                    required: [evt]
+                    properties:
+                      evt:
+                        type: string
+                        example: "SPEAKING_START"
+
+  /discord/command:
+    post:
+      tags: [Discord]
+      summary: Discord RPC 生コマンド送信
+      description: |
+        任意の Discord RPC コマンドを直接送信する。
+        上記の Discord エンドポイントでカバーされていないコマンドを使う場合に利用する。
+        Discord RPC コマンド一覧は https://docs.discord.com/developers/topics/rpc を参照。
+
+        **対応している追加コマンド例:**
+        - `SET_CERTIFIED_DEVICES`: ハードウェアメーカー向けデバイス情報送信
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cmd]
+              properties:
+                cmd:
+                  type: string
+                  description: Discord RPC コマンド名
+                  example: "SET_CERTIFIED_DEVICES"
+                args:
+                  type: object
+                  nullable: true
+                  description: |
+                    コマンドの引数。SET_CERTIFIED_DEVICES の場合:
+                    `{"devices": [DiscordCertifiedDevice, ...]}`
+                  example:
+                    devices:
+                      - type: "audioinput"
+                        id: "aafc2003-da0e-42a3-b982-6a17a2812510"
+                        vendor:
+                          name: "SteelSeries"
+                          url: "https://steelseries.com"
+                        model:
+                          name: "Arctis 7"
+                          url: "https://steelseries.com/gaming-headsets/arctis-7"
+                        related: []
+                        echo_cancellation: true
+                        noise_suppression: true
+                        automatic_gain_control: true
+                        hardware_mute: false
+                evt:
+                  type: string
+                  nullable: true
+                  description: SUBSCRIBE/UNSUBSCRIBE 時のイベント名
+                  example: null
+      responses:
+        "200":
+          description: Discord からのレスポンスをそのまま返す（DiscordRpcPayload形式）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscordRpcPayload"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+# ══════════════════════════════════════════════════
+# タグ定義
+# ══════════════════════════════════════════════════
+tags:
+  - name: System
+    description: OS・稼働時間・ユーザー・バッテリー情報
+  - name: Hardware
+    description: CPU・メモリ・ディスク・ネットワーク
+  - name: Processes
+    description: プロセス管理・アクティブウィンドウ
+  - name: Control
+    description: 電源操作・コマンド実行・アプリ起動
+  - name: Input
+    description: マウス・キーボード・メディアキー操作
+  - name: Files
+    description: ファイル・ディレクトリ管理・転送
+  - name: Utils
+    description: スクリーンショット・クリップボード・通知
+  - name: Discord
+    description: |
+      Discord RPC over IPC
+
+      ## 購読イベントのデータ構造一覧
+
+      `/discord/subscribe` で購読後に Discord IPC から非同期に届くイベントの `data` フィールド構造。
+
+      | イベント | dataスキーマ | 必要スコープ |
+      |---|---|---|
+      | `READY` | `DiscordReadyData` | なし |
+      | `ERROR` | `{code: int, message: string}` | なし |
+      | `GUILD_STATUS` | `DiscordGuildStatusData` | `rpc` |
+      | `GUILD_CREATE` | `{id: string, name: string}` | `rpc` |
+      | `CHANNEL_CREATE` | `DiscordPartialChannel` | `rpc` |
+      | `VOICE_CHANNEL_SELECT` | `{channel_id: string\|null, guild_id: string\|null}` | `rpc` |
+      | `VOICE_STATE_CREATE` | `DiscordVoiceStateEntry` | `rpc` |
+      | `VOICE_STATE_UPDATE` | `DiscordVoiceStateEntry` | `rpc` |
+      | `VOICE_STATE_DELETE` | `DiscordVoiceStateEntry` | `rpc` |
+      | `VOICE_SETTINGS_UPDATE` | `DiscordVoiceSettings` | `rpc` |
+      | `VOICE_CONNECTION_STATUS` | `DiscordVoiceConnectionStatusData` | `rpc` |
+      | `SPEAKING_START` | `{user_id: string}` | `rpc` |
+      | `SPEAKING_STOP` | `{user_id: string}` | `rpc` |
+      | `MESSAGE_CREATE` | `{channel_id: string, message: DiscordMessage}` | `rpc`, `messages.read` |
+      | `MESSAGE_UPDATE` | `{channel_id: string, message: DiscordMessage}` | `rpc`, `messages.read` |
+      | `MESSAGE_DELETE` | `{channel_id: string, message: {id: string}}` | `rpc`, `messages.read` |
+      | `NOTIFICATION_CREATE` | `DiscordNotificationData` | `rpc.notifications.read` |
+      | `ACTIVITY_JOIN` | `{secret: string}` | `rpc` |
+      | `ACTIVITY_SPECTATE` | `{secret: string}` | `rpc` |
+      | `ACTIVITY_JOIN_REQUEST` | `{user: DiscordUser}` | `rpc` |
+      | `ACTIVITY_INVITE` | `DiscordActivityInviteData` | `rpc` |
+      | `CURRENT_USER_UPDATE` | `DiscordCurrentUserData` | `rpc` |
+      | `RELATIONSHIP_UPDATE` | `DiscordRelationship` | `relationships_read` |
+      | `ENTITLEMENT_CREATE` | `{entitlement: DiscordEntitlement}` | `rpc` |
+      | `ENTITLEMENT_DELETE` | `{entitlement: DiscordEntitlement}` | `rpc` |
