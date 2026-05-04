@@ -17,6 +17,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 import json
 import unicodedata
+import time
 from difflib import SequenceMatcher
 from pathlib import Path
 from threading import Lock
@@ -107,6 +108,7 @@ class MessageRequest(BaseModel):
 class MessageResponse(BaseModel):
     answer: str
     trace: list[dict[str, Any]] = Field(default_factory=list)
+    total_duration: float = 0.0
 
 
 @dataclass
@@ -1073,12 +1075,14 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
     ]
 
     for turn in range(1, MAX_AI_TURNS + 1):
+        start_ai = time.perf_counter()
         ai_out, response = await call_ai(contents)
+        duration_ai = time.perf_counter() - start_ai
 
         if ai_out.final:
             if not ai_out.answer:
                 raise HTTPException(status_code=500, detail="AI returned final=true but answer was empty")
-            ctx.trace.append({"turn": turn, "type": "final"})
+            ctx.trace.append({"turn": turn, "type": "final", "ai_duration": round(duration_ai, 4)})
             return ai_out.answer
 
         if not ai_out.tool_calls:
@@ -1092,9 +1096,18 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
             if tool_call.name not in TOOL_REGISTRY:
                 raise HTTPException(status_code=400, detail=f"Unknown tool: {tool_call.name}")
 
+            start_tool = time.perf_counter()
             result = await TOOL_REGISTRY[tool_call.name](ctx, tool_call.arguments)
+            duration_tool = time.perf_counter() - start_tool
+
             res_keys = list(result.keys()) if isinstance(result, dict) else []
-            ctx.trace.append({"turn": turn, "tool": tool_call.name, "result_keys": res_keys})
+            ctx.trace.append({
+                "turn": turn,
+                "tool": tool_call.name,
+                "result_keys": res_keys,
+                "tool_duration": round(duration_tool, 4),
+                "ai_duration": round(duration_ai, 4)
+            })
 
             function_response_part = types.Part.from_function_response(
                 name=tool_call.name,
@@ -1112,9 +1125,15 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
 
 @app.post("/message", response_model=MessageResponse)
 async def message(req: MessageRequest) -> MessageResponse:
+    start_time = time.perf_counter()
     ctx = RequestContext()
     answer = await run_ai_loop(req.message, ctx)
-    return MessageResponse(answer=answer, trace=ctx.trace)
+    duration = time.perf_counter() - start_time
+    return MessageResponse(
+        answer=answer,
+        trace=ctx.trace,
+        total_duration=round(duration, 4)
+    )
 
 
 if __name__ == "__main__":
