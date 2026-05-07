@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +12,8 @@ from typing import Any, Awaitable, Callable
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from groq import AsyncGroq
+from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
 import json
 import unicodedata
@@ -19,20 +21,18 @@ import time
 from difflib import SequenceMatcher
 from pathlib import Path
 from threading import Lock
-
 load_dotenv()
 
 API_BASE = os.getenv("API_BASE", "http://localhost:8080/")
 LIGHT_API_BASE = os.getenv("LIGHT_API_BASE", "http://192.168.50.186/")
 LIGHT_ADDR = os.getenv("LIGHT_ADDR", "0xD001")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")  # GroqのLlamaモデル名を指定
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 MAX_AI_TURNS = int(os.getenv("MAX_AI_TURNS", "5"))
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "8.0"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 REFERENCE_REGISTRY_PATH = Path(os.getenv("REFERENCE_REGISTRY_PATH", "reference_registry.json"))
 REFERENCE_LOCK = Lock()
-
 SYSTEM_PROMPT = """
 あなたはPCや部屋の情報を取得、操作して回答する高速応答AIです。
 
@@ -66,10 +66,10 @@ SYSTEM_PROMPT = """
 """.strip()
 
 LIGHT_MODE_TO_CMD = {
-    "4": "0x20",  # 全灯
-    "3": "0x21",  # エコ（仮、必要に応じて修正）
-    "2": "0x22",  # 常夜灯（仮）
-    "1": "0x23",  # 消灯
+    4: "0x20",  # 全灯
+    3: "0x21",  # エコ（仮、必要に応じて修正）
+    2: "0x22",  # 常夜灯（仮）
+    1: "0x23",  # 消灯
 }
 
 app = FastAPI(title="AI Message Server", version="1.0.0")
@@ -103,7 +103,7 @@ class AIResult(BaseModel):
     tool_calls: list[ToolCall] = Field(default_factory=list)
 
 
-_groq_client: AsyncGroq | None = None
+_gemini_client: genai.Client | None = None
 
 def normalize_text(text: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text).casefold())
@@ -158,38 +158,30 @@ def score_reference(query: str, alias: str, value: str) -> float:
     return max(alias_score, value_score)
 
 
-# Groq (OpenAI互換) 用のスキーマ生成ヘルパー関数群
-def S(type_: str, **kwargs: Any) -> dict[str, Any]:
-    return {"type": type_, **kwargs}
+def S(type_: Any, **kwargs: Any) -> types.Schema:
+    return types.Schema(type=type_, **kwargs)
 
 
-def O(properties: dict[str, dict[str, Any]], required: list[str] | None = None, description: str | None = None) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"type": "object", "properties": properties}
+def O(properties: dict[str, types.Schema], required: list[str] | None = None, description: str | None = None) -> types.Schema:
+    kwargs: dict[str, Any] = {"type": types.Type.OBJECT, "properties": properties}
     if required:
         kwargs["required"] = required
     if description:
         kwargs["description"] = description
-    return kwargs
+    return types.Schema(**kwargs)
 
 
-def A(items: dict[str, Any], description: str | None = None) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"type": "array", "items": items}
+def A(items: types.Schema, description: str | None = None) -> types.Schema:
+    kwargs: dict[str, Any] = {"type": types.Type.ARRAY, "items": items}
     if description:
         kwargs["description"] = description
-    return kwargs
+    return types.Schema(**kwargs)
 
 
-def FN(name: str, description: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
+def FN(name: str, description: str, parameters: types.Schema | None = None) -> types.FunctionDeclaration:
     if parameters is None:
-        parameters = {"type": "object", "properties": {}}
-    return {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": description,
-            "parameters": parameters,
-        }
-    }
+        return types.FunctionDeclaration(name=name, description=description)
+    return types.FunctionDeclaration(name=name, description=description, parameters=parameters)
 
 
 async def api_request(
@@ -435,6 +427,7 @@ async def delete_reference_alias(args: dict[str, Any]) -> Any:
 
 async def control_light(args: dict[str, Any]) -> Any:
     mode = args.get("mode")
+
     if mode not in LIGHT_MODE_TO_CMD:
         return {"error": "invalid mode. use 1-4"}
 
@@ -465,371 +458,375 @@ async def control_light(args: dict[str, Any]) -> Any:
         return {"error": str(e)}
 
 
-TOOL_DEFINITIONS: list[dict[str, Any]] = [
-    FN("get_system_summary", "OS情報、稼働時間、ユーザー、バッテリーを一括取得します。"),
-    FN("get_os_info", "OS名、バージョン、ホスト名などの情報を取得します。"),
-    FN("get_uptime", "システムの稼働時間を取得します。"),
-    FN("get_users", "現在ログインしているユーザー一覧を取得します。"),
-    FN("get_battery", "バッテリー残量と充電状態を取得します。"),
+TOOL_DEFINITIONS: list[types.Tool] = [
+    types.Tool(
+        function_declarations=[
+            FN("get_system_summary", "OS情報、稼働時間、ユーザー、バッテリーを一括取得します。"),
+            FN("get_os_info", "OS名、バージョン、ホスト名などの情報を取得します。"),
+            FN("get_uptime", "システムの稼働時間を取得します。"),
+            FN("get_users", "現在ログインしているユーザー一覧を取得します。"),
+            FN("get_battery", "バッテリー残量と充電状態を取得します。"),
 
-    FN("get_cpu_info", "CPUのモデル、使用率、温度、コア情報を取得します。"),
-    FN("get_memory_info", "メモリ（RAM）とスワップの使用状況を取得します。"),
-    FN("get_disks_info", "ディスクドライブの一覧と使用状況を取得します。"),
-    FN("get_network_info", "ネットワークインターフェースの状態と速度を取得します。"),
+            FN("get_cpu_info", "CPUのモデル、使用率、温度、コア情報を取得します。"),
+            FN("get_memory_info", "メモリ（RAM）とスワップの使用状況を取得します。"),
+            FN("get_disks_info", "ディスクドライブの一覧と使用状況を取得します。"),
+            FN("get_network_info", "ネットワークインターフェースの状態と速度を取得します。"),
 
-    FN("get_processes", "実行中のプロセス一覧を取得します。"),
-    FN(
-        "kill_process",
-        "PIDまたはプロセス名でプロセスを強制終了します。",
-        O(
-            {
-                "pid": S("integer", description="終了対象のプロセスID"),
-                "name": S("string", description="終了対象のプロセス名"),
-            }
-        ),
-    ),
-    FN("get_startup_programs", "自動起動登録されているプログラム一覧を取得します。"),
-    FN("get_active_window", "現在最前面にあるウィンドウのタイトルを取得します。"),
-
-    FN("shutdown_pc", "PCをシャットダウンします。"),
-    FN("reboot_pc", "PCを再起動します。"),
-    FN("sleep_pc", "PCをスリープ状態にします。"),
-    FN("lock_pc", "画面をロックします。"),
-    FN("logout_pc", "現在のセッションをログアウトします。"),
-    FN(
-        "execute_command",
-        "シェルコマンドを実行します。",
-        O({"command": S("string", description="実行するコマンド")}, required=["command"]),
-    ),
-    FN(
-        "launch_app",
-        "指定したパスのアプリを起動します。",
-        O({"path": S("string", description="実行ファイルのパス")}, required=["path"]),
-    ),
-
-    FN(
-        "mouse_move",
-        "マウスを移動します。",
-        O(
-            {
-                "x": S("integer"),
-                "y": S("integer"),
-                "absolute": S("boolean", description="絶対座標かどうか。デフォルトTrue"),
-            },
-            required=["x", "y"],
-        ),
-    ),
-    FN(
-        "mouse_click",
-        "マウスクリックを実行します。",
-        O(
-            {
-                "button": S("string", description="left, right, middle"),
-                "x": S("integer"),
-                "y": S("integer"),
-                "double": S("boolean"),
-            },
-            required=["button"],
-        ),
-    ),
-    FN(
-        "mouse_scroll",
-        "マウスホイールスクロールを実行します。",
-        O(
-            {
-                "x": S("integer"),
-                "y": S("integer"),
-                "axis": S("string", description="vertical または horizontal"),
-            },
-            required=["x", "y"],
-        ),
-    ),
-    FN(
-        "keyboard_type",
-        "テキストを入力します。",
-        O({"text": S("string")}, required=["text"]),
-    ),
-    FN(
-        "keyboard_shortcut",
-        "ショートカットキーを実行します。",
-        O(
-            {"keys": A(S("string"), description="例: ['ctrl', 's']")},
-            required=["keys"],
-        ),
-    ),
-    FN(
-        "input_media",
-        "メディアキー操作を実行します。",
-        O(
-            {
-                "action": S(
-                    "string",
-                    description="volume_up, volume_down, mute, play_pause, next, prev",
-                )
-            },
-            required=["action"],
-        ),
-    ),
-
-    FN(
-        "list_files",
-        "指定パスのディレクトリ内容を表示します。",
-        O({"path": S("string")}, required=["path"]),
-    ),
-    FN(
-        "move_file",
-        "ファイルまたはディレクトリを移動します。",
-        O({"src": S("string"), "dst": S("string")}, required=["src", "dst"]),
-    ),
-    FN(
-        "copy_file",
-        "ファイルをコピーします。",
-        O({"src": S("string"), "dst": S("string")}, required=["src", "dst"]),
-    ),
-    FN(
-        "delete_file",
-        "ファイルまたはディレクトリを削除します。",
-        O({"path": S("string")}, required=["path"]),
-    ),
-    FN(
-        "rename_file",
-        "ファイルまたはディレクトリの名前を変更します。",
-        O({"src": S("string"), "new_name": S("string")}, required=["src", "new_name"]),
-    ),
-    FN(
-        "upload_files",
-        "ファイルをアップロードします。content_base64 を使って送信します。",
-        O(
-            {
-                "path": S("string"),
-                "files": A(
-                    O(
-                        {
-                            "filename": S("string"),
-                            "content_base64": S("string"),
-                            "content_type": S("string"),
-                        }
-                    )
-                ),
-            },
-            required=["path"],
-        ),
-    ),
-    FN(
-        "download_file",
-        "ファイルをダウンロードして Base64 で返します。",
-        O({"path": S("string")}, required=["path"]),
-    ),
-
-    FN("get_screenshot", "スクリーンショットをBase64形式で取得します。"),
-    FN("get_clipboard", "クリップボードのテキストを読み取ります。"),
-    FN(
-        "set_clipboard",
-        "クリップボードにテキストを書き込みます。",
-        O({"text": S("string")}, required=["text"]),
-    ),
-    FN(
-        "notify",
-        "デスクトップ通知を表示します。",
-        O(
-            {
-                "title": S("string"),
-                "body": S("string"),
-                "icon": S("string"),
-            },
-            required=["title", "body"],
-        ),
-    ),
-
-    FN("get_discord_status", "Discord RPCの接続状態を確認します。"),
-    FN("get_discord_guilds", "参加しているDiscordサーバー一覧を取得します。"),
-    FN(
-        "get_discord_guild",
-        "Discordサーバーの詳細情報を取得します。",
-        O(
-            {
-                "guild_id": S("string"),
-                "timeout": S("integer"),
-            },
-            required=["guild_id"],
-        ),
-    ),
-    FN(
-        "get_discord_channels",
-        "サーバー内のチャンネル一覧を取得します。",
-        O({"guild_id": S("string")}, required=["guild_id"]),
-    ),
-    FN(
-        "get_discord_channel",
-        "チャンネル詳細を取得します。",
-        O({"channel_id": S("string")}, required=["channel_id"]),
-    ),
-    FN("get_discord_voice_settings", "Discordのボイス設定を取得します。"),
-    FN(
-        "set_discord_voice_settings",
-        "Discordのボイス設定を変更します。",
-        O(
-            {
-                "input": O(
+            FN("get_processes", "実行中のプロセス一覧を取得します。"),
+            FN(
+                "kill_process",
+                "PIDまたはプロセス名でプロセスを強制終了します。",
+                O(
                     {
-                        "device_id": S("string"),
-                        "volume": S("number"),
-                        "available_devices": A(O({"id": S("string"), "name": S("string")})),
+                        "pid": S(types.Type.INTEGER, description="終了対象のプロセスID"),
+                        "name": S(types.Type.STRING, description="終了対象のプロセス名"),
                     }
                 ),
-                "output": O(
+            ),
+            FN("get_startup_programs", "自動起動登録されているプログラム一覧を取得します。"),
+            FN("get_active_window", "現在最前面にあるウィンドウのタイトルを取得します。"),
+
+            FN("shutdown_pc", "PCをシャットダウンします。"),
+            FN("reboot_pc", "PCを再起動します。"),
+            FN("sleep_pc", "PCをスリープ状態にします。"),
+            FN("lock_pc", "画面をロックします。"),
+            FN("logout_pc", "現在のセッションをログアウトします。"),
+            FN(
+                "execute_command",
+                "シェルコマンドを実行します。",
+                O({"command": S(types.Type.STRING, description="実行するコマンド")}, required=["command"]),
+            ),
+            FN(
+                "launch_app",
+                "指定したパスのアプリを起動します。",
+                O({"path": S(types.Type.STRING, description="実行ファイルのパス")}, required=["path"]),
+            ),
+
+            FN(
+                "mouse_move",
+                "マウスを移動します。",
+                O(
                     {
-                        "device_id": S("string"),
-                        "volume": S("number"),
-                        "available_devices": A(O({"id": S("string"), "name": S("string")})),
-                    }
+                        "x": S(types.Type.INTEGER),
+                        "y": S(types.Type.INTEGER),
+                        "absolute": S(types.Type.BOOLEAN, description="絶対座標かどうか。デフォルトTrue"),
+                    },
+                    required=["x", "y"],
                 ),
-                "mode": O(
+            ),
+            FN(
+                "mouse_click",
+                "マウスクリックを実行します。",
+                O(
                     {
-                        "type": S("string"),
-                        "auto_threshold": S("boolean"),
-                        "threshold": S("number"),
-                        "shortcut": A(
+                        "button": S(types.Type.STRING, description="left, right, middle"),
+                        "x": S(types.Type.INTEGER),
+                        "y": S(types.Type.INTEGER),
+                        "double": S(types.Type.BOOLEAN),
+                    },
+                    required=["button"],
+                ),
+            ),
+            FN(
+                "mouse_scroll",
+                "マウスホイールスクロールを実行します。",
+                O(
+                    {
+                        "x": S(types.Type.INTEGER),
+                        "y": S(types.Type.INTEGER),
+                        "axis": S(types.Type.STRING, description="vertical または horizontal"),
+                    },
+                    required=["x", "y"],
+                ),
+            ),
+            FN(
+                "keyboard_type",
+                "テキストを入力します。",
+                O({"text": S(types.Type.STRING)}, required=["text"]),
+            ),
+            FN(
+                "keyboard_shortcut",
+                "ショートカットキーを実行します。",
+                O(
+                    {"keys": A(S(types.Type.STRING), description="例: ['ctrl', 's']")},
+                    required=["keys"],
+                ),
+            ),
+            FN(
+                "input_media",
+                "メディアキー操作を実行します。",
+                O(
+                    {
+                        "action": S(
+                            types.Type.STRING,
+                            description="volume_up, volume_down, mute, play_pause, next, prev",
+                        )
+                    },
+                    required=["action"],
+                ),
+            ),
+
+            FN(
+                "list_files",
+                "指定パスのディレクトリ内容を表示します。",
+                O({"path": S(types.Type.STRING)}, required=["path"]),
+            ),
+            FN(
+                "move_file",
+                "ファイルまたはディレクトリを移動します。",
+                O({"src": S(types.Type.STRING), "dst": S(types.Type.STRING)}, required=["src", "dst"]),
+            ),
+            FN(
+                "copy_file",
+                "ファイルをコピーします。",
+                O({"src": S(types.Type.STRING), "dst": S(types.Type.STRING)}, required=["src", "dst"]),
+            ),
+            FN(
+                "delete_file",
+                "ファイルまたはディレクトリを削除します。",
+                O({"path": S(types.Type.STRING)}, required=["path"]),
+            ),
+            FN(
+                "rename_file",
+                "ファイルまたはディレクトリの名前を変更します。",
+                O({"src": S(types.Type.STRING), "new_name": S(types.Type.STRING)}, required=["src", "new_name"]),
+            ),
+            FN(
+                "upload_files",
+                "ファイルをアップロードします。content_base64 を使って送信します。",
+                O(
+                    {
+                        "path": S(types.Type.STRING),
+                        "files": A(
                             O(
                                 {
-                                    "type": S("integer"),
-                                    "code": S("integer"),
-                                    "name": S("string"),
+                                    "filename": S(types.Type.STRING),
+                                    "content_base64": S(types.Type.STRING),
+                                    "content_type": S(types.Type.STRING),
                                 }
                             )
                         ),
-                        "delay": S("number"),
+                    },
+                    required=["path"],
+                ),
+            ),
+            FN(
+                "download_file",
+                "ファイルをダウンロードして Base64 で返します。",
+                O({"path": S(types.Type.STRING)}, required=["path"]),
+            ),
+
+            FN("get_screenshot", "スクリーンショットをBase64形式で取得します。"),
+            FN("get_clipboard", "クリップボードのテキストを読み取ります。"),
+            FN(
+                "set_clipboard",
+                "クリップボードにテキストを書き込みます。",
+                O({"text": S(types.Type.STRING)}, required=["text"]),
+            ),
+            FN(
+                "notify",
+                "デスクトップ通知を表示します。",
+                O(
+                    {
+                        "title": S(types.Type.STRING),
+                        "body": S(types.Type.STRING),
+                        "icon": S(types.Type.STRING),
+                    },
+                    required=["title", "body"],
+                ),
+            ),
+
+            FN("get_discord_status", "Discord RPCの接続状態を確認します。"),
+            FN("get_discord_guilds", "参加しているDiscordサーバー一覧を取得します。"),
+            FN(
+                "get_discord_guild",
+                "Discordサーバーの詳細情報を取得します。",
+                O(
+                    {
+                        "guild_id": S(types.Type.STRING),
+                        "timeout": S(types.Type.INTEGER),
+                    },
+                    required=["guild_id"],
+                ),
+            ),
+            FN(
+                "get_discord_channels",
+                "サーバー内のチャンネル一覧を取得します。",
+                O({"guild_id": S(types.Type.STRING)}, required=["guild_id"]),
+            ),
+            FN(
+                "get_discord_channel",
+                "チャンネル詳細を取得します。",
+                O({"channel_id": S(types.Type.STRING)}, required=["channel_id"]),
+            ),
+            FN("get_discord_voice_settings", "Discordのボイス設定を取得します。"),
+            FN(
+                "set_discord_voice_settings",
+                "Discordのボイス設定を変更します。",
+                O(
+                    {
+                        "input": O(
+                            {
+                                "device_id": S(types.Type.STRING),
+                                "volume": S(types.Type.NUMBER),
+                                "available_devices": A(O({"id": S(types.Type.STRING), "name": S(types.Type.STRING)})),
+                            }
+                        ),
+                        "output": O(
+                            {
+                                "device_id": S(types.Type.STRING),
+                                "volume": S(types.Type.NUMBER),
+                                "available_devices": A(O({"id": S(types.Type.STRING), "name": S(types.Type.STRING)})),
+                            }
+                        ),
+                        "mode": O(
+                            {
+                                "type": S(types.Type.STRING),
+                                "auto_threshold": S(types.Type.BOOLEAN),
+                                "threshold": S(types.Type.NUMBER),
+                                "shortcut": A(
+                                    O(
+                                        {
+                                            "type": S(types.Type.INTEGER),
+                                            "code": S(types.Type.INTEGER),
+                                            "name": S(types.Type.STRING),
+                                        }
+                                    )
+                                ),
+                                "delay": S(types.Type.NUMBER),
+                            }
+                        ),
+                        "automatic_gain_control": S(types.Type.BOOLEAN),
+                        "echo_cancellation": S(types.Type.BOOLEAN),
+                        "noise_suppression": S(types.Type.BOOLEAN),
+                        "qos": S(types.Type.BOOLEAN),
+                        "silence_warning": S(types.Type.BOOLEAN),
+                        "deaf": S(types.Type.BOOLEAN),
+                        "mute": S(types.Type.BOOLEAN),
                     }
                 ),
-                "automatic_gain_control": S("boolean"),
-                "echo_cancellation": S("boolean"),
-                "noise_suppression": S("boolean"),
-                "qos": S("boolean"),
-                "silence_warning": S("boolean"),
-                "deaf": S("boolean"),
-                "mute": S("boolean"),
-            }
-        ),
-    ),
-    FN(
-        "get_discord_voice_channel",
-        "現在のボイスチャンネルを取得します。",
-    ),
-    FN(
-        "select_discord_voice_channel",
-        "Discordのボイスチャンネルに参加または退出します。",
-        O(
-            {
-                "channel_id": S("string"),
-                "timeout": S("integer"),
-                "force": S("boolean"),
-                "navigate": S("boolean"),
-            }
-        ),
-    ),
-    FN(
-        "select_discord_text_channel",
-        "Discordのテキストチャンネルを表示します。",
-        O({"channel_id": S("string"), "timeout": S("integer")}, required=["channel_id"]),
-    ),
-    FN(
-        "set_discord_user_voice_settings",
-        "ユーザーごとのボイス設定を変更します。",
-        O(
-            {
-                "user_id": S("string"),
-                "volume": S("integer"),
-                "mute": S("boolean"),
-                "pan": O({"left": S("number"), "right": S("number")}),
-            },
-            required=["user_id"],
-        ),
-    ),
-    FN(
-        "discord_activity_join_invite",
-        "Activity Join 招待を承諾します。",
-        O({"user_id": S("string")}, required=["user_id"]),
-    ),
-    FN(
-        "discord_activity_close_request",
-        "Activity Join リクエストを拒否します。",
-        O({"user_id": S("string")}, required=["user_id"]),
-    ),
-    FN(
-        "subscribe_discord_event",
-        "Discordイベントの購読を開始します。",
-        O(
-            {
-                "evt": S("string"),
-                "args": S("object"),
-            },
-            required=["evt"],
-        ),
-    ),
-    FN(
-        "unsubscribe_discord_event",
-        "Discordイベントの購読を解除します。",
-        O(
-            {
-                "evt": S("string"),
-                "args": S("object"),
-            },
-            required=["evt"],
-        ),
-    ),
-    FN(
-        "discord_command",
-        "任意の Discord RPC コマンドを送信します。SET_CERTIFIED_DEVICES なども送れます。",
-        O(
-            {
-                "cmd": S("string"),
-                "args": S("object"),
-                "evt": S("string"),
-            },
-            required=["cmd"],
-        ),
-    ),
-    FN(
-        "resolve_reference",
-        "曖昧な名前をIDやパスに解決します。あのチャンネル、いつものゲーム、作業フォルダなどに使います。",
-        O(
-            {
-                "query": S("string", description="解決したい曖昧な名前"),
-                "kind": S("string", description="discord_channel, app_path, file_path, any など"),
-                "limit": S("integer", description="返す候補数"),
-            },
-            required=["query"],
-        ),
-    ),
-    FN(
-        "list_reference_aliases",
-        "登録済みの別名一覧を取得します。",
-        O(
-            {
-                "kind": S("string", description="対象の種類。未指定なら全件"),
-            }
-        ),
-    ),
-    FN(
-        "control_light",
-        "部屋の照明を操作します。4=全灯, 3=エコ, 2=常夜灯, 1=消灯",
-        O(
-            {
-                "mode": S("string", description="1=消灯, 2=常夜灯, 3=エコ, 4=全灯"),
-            },
-            required=["mode"],
-        ),
-    ),
+            ),
+            FN(
+                "get_discord_voice_channel",
+                "現在のボイスチャンネルを取得します。",
+            ),
+            FN(
+                "select_discord_voice_channel",
+                "Discordのボイスチャンネルに参加または退出します。",
+                O(
+                    {
+                        "channel_id": S(types.Type.STRING),
+                        "timeout": S(types.Type.INTEGER),
+                        "force": S(types.Type.BOOLEAN),
+                        "navigate": S(types.Type.BOOLEAN),
+                    }
+                ),
+            ),
+            FN(
+                "select_discord_text_channel",
+                "Discordのテキストチャンネルを表示します。",
+                O({"channel_id": S(types.Type.STRING), "timeout": S(types.Type.INTEGER)}, required=["channel_id"]),
+            ),
+            FN(
+                "set_discord_user_voice_settings",
+                "ユーザーごとのボイス設定を変更します。",
+                O(
+                    {
+                        "user_id": S(types.Type.STRING),
+                        "volume": S(types.Type.INTEGER),
+                        "mute": S(types.Type.BOOLEAN),
+                        "pan": O({"left": S(types.Type.NUMBER), "right": S(types.Type.NUMBER)}),
+                    },
+                    required=["user_id"],
+                ),
+            ),
+             FN(
+                "discord_activity_join_invite",
+                "Activity Join 招待を承諾します。",
+                O({"user_id": S(types.Type.STRING)}, required=["user_id"]),
+            ),
+            FN(
+                "discord_activity_close_request",
+                "Activity Join リクエストを拒否します。",
+                O({"user_id": S(types.Type.STRING)}, required=["user_id"]),
+            ),
+            FN(
+                "subscribe_discord_event",
+                "Discordイベントの購読を開始します。",
+                O(
+                    {
+                        "evt": S(types.Type.STRING),
+                        "args": types.Schema(type=types.Type.OBJECT),
+                    },
+                    required=["evt"],
+                ),
+            ),
+            FN(
+                "unsubscribe_discord_event",
+                "Discordイベントの購読を解除します。",
+                O(
+                    {
+                        "evt": S(types.Type.STRING),
+                        "args": types.Schema(type=types.Type.OBJECT),
+                    },
+                    required=["evt"],
+                ),
+            ),
+            FN(
+                "discord_command",
+                "任意の Discord RPC コマンドを送信します。SET_CERTIFIED_DEVICES なども送れます。",
+                O(
+                    {
+                        "cmd": S(types.Type.STRING),
+                        "args": types.Schema(type=types.Type.OBJECT),
+                        "evt": S(types.Type.STRING),
+                    },
+                    required=["cmd"],
+                ),
+            ),
+            FN(
+                "resolve_reference",
+                "曖昧な名前をIDやパスに解決します。あのチャンネル、いつものゲーム、作業フォルダなどに使います。",
+                O(
+                    {
+                        "query": S(types.Type.STRING, description="解決したい曖昧な名前"),
+                        "kind": S(types.Type.STRING, description="discord_channel, app_path, file_path, any など"),
+                        "limit": S(types.Type.INTEGER, description="返す候補数"),
+                    },
+                    required=["query"],
+                ),
+            ),
+            FN(
+                "list_reference_aliases",
+                "登録済みの別名一覧を取得します。",
+                O(
+                    {
+                        "kind": S(types.Type.STRING, description="対象の種類。未指定なら全件"),
+                    }
+                ),
+            ),
+            FN(
+                "control_light",
+                "部屋の照明を操作します。4=全灯, 3=エコ, 2=常夜灯, 1=消灯",
+                O(
+                    {
+                        "mode": S(types.Type.INTEGER, description="1=消灯, 2=常夜灯, 3=エコ, 4=全灯"),
+                    },
+                    required=["mode"],
+                ),
+            ),
+        ]
+    )
 ]
 
 
-def get_groq_client() -> AsyncGroq:
-    global _groq_client
-    if _groq_client is None:
-        if not GROQ_API_KEY:
-            raise RuntimeError("GROQ_API_KEY is not set")
-        _groq_client = AsyncGroq(api_key=GROQ_API_KEY)
-    return _groq_client
+def get_gemini_client() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    return _gemini_client
 
 
 TOOL_REGISTRY: dict[str, Callable[[RequestContext, dict[str, Any]], Awaitable[Any]]] = {
@@ -924,53 +921,61 @@ def to_jsonable(value: Any) -> Any:
     return str(value)
 
 
-async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
-    client = get_groq_client()
-    
-    response = await client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=messages,
+def build_generation_config() -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
         tools=TOOL_DEFINITIONS,
-        tool_choice="auto",
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         temperature=TEMPERATURE,
+        thinking_config=types.ThinkingConfig(include_thoughts=False)
     )
 
-    msg = response.choices[0].message
+
+async def call_ai(contents: list[Any]) -> tuple[AIResult, Any]:
+    def _sync_generate() -> Any:
+        client = get_gemini_client()
+        return client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=contents,
+            config=build_generation_config(),
+        )
+
+    response = await asyncio.to_thread(_sync_generate)
+
+    function_calls = list(getattr(response, "function_calls", []) or [])
     tool_calls: list[ToolCall] = []
 
-    if msg.tool_calls:
-        for tc in msg.tool_calls:
-            try:
-                args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                args = {}
-            
-            tool_calls.append(
-                ToolCall(
-                    name=tc.function.name,
-                    arguments=args,
-                    call_id=tc.id,
-                )
+    for fc in function_calls:
+        args = getattr(fc, "args", {}) or {}
+        tool_calls.append(
+            ToolCall(
+                name=getattr(fc, "name", ""),
+                arguments=dict(args),
+                call_id=getattr(fc, "id", None),
             )
-            
-        return AIResult(final=False, tool_calls=tool_calls), msg
+        )
 
-    text = msg.content
+    if tool_calls:
+        return AIResult(final=False, tool_calls=tool_calls), response
+
+    text = getattr(response, "text", None)
     if isinstance(text, str) and text.strip():
-        return AIResult(final=True, answer=text.strip()), msg
+        return AIResult(final=True, answer=text.strip()), response
 
-    raise HTTPException(status_code=500, detail="Groq response did not contain text or function calls")
+    raise HTTPException(status_code=500, detail="Gemini response did not contain text or function calls")
 
 
 async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_message}
+    contents: list[Any] = [
+        types.Content(
+            role="user",
+            parts=[types.Part(text=user_message)],
+        )
     ]
 
     for turn in range(1, MAX_AI_TURNS + 1):
         start_ai = time.perf_counter()
-        ai_out, msg_obj = await call_ai(messages)
+        ai_out, response = await call_ai(contents)
         duration_ai = time.perf_counter() - start_ai
 
         if ai_out.final:
@@ -982,23 +987,9 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
         if not ai_out.tool_calls:
             raise HTTPException(status_code=500, detail="AI did not return tool calls")
 
-        # Groqのメッセージ履歴に追加するために辞書化して追加
-        assistant_msg: dict[str, Any] = {"role": "assistant"}
-        if msg_obj.content:
-            assistant_msg["content"] = msg_obj.content
-        if msg_obj.tool_calls:
-            assistant_msg["tool_calls"] = [
-                {
-                    "id": tc.id, 
-                    "type": "function", 
-                    "function": {
-                        "name": tc.function.name, 
-                        "arguments": tc.function.arguments
-                    }
-                }
-                for tc in msg_obj.tool_calls
-            ]
-        messages.append(assistant_msg)
+        model_content = response.candidates[0].content if getattr(response, "candidates", None) else None
+        if model_content is not None:
+            contents.append(model_content)
 
         for tool_call in ai_out.tool_calls:
             if tool_call.name not in TOOL_REGISTRY:
@@ -1017,14 +1008,15 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
                 "ai_duration": round(duration_ai, 4)
             })
 
-            # ツール結果をメッセージ履歴に追加
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call.call_id,
-                    "name": tool_call.name,
-                    "content": json.dumps({"result": to_jsonable(result)}, ensure_ascii=False),
-                }
+            function_response_part = types.Part.from_function_response(
+                name=tool_call.name,
+                response={"result": to_jsonable(result)},
+            )
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[function_response_part],
+                )
             )
 
     raise HTTPException(status_code=409, detail="AI loop exceeded max turns")
