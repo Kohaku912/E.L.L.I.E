@@ -26,7 +26,7 @@ API_BASE = os.getenv("API_BASE", "http://localhost:8080/")
 LIGHT_API_BASE = os.getenv("LIGHT_API_BASE", "http://192.168.50.186/")
 LIGHT_ADDR = os.getenv("LIGHT_ADDR", "0xD001")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")  # GroqのLlamaモデル名を指定
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 MAX_AI_TURNS = int(os.getenv("MAX_AI_TURNS", "5"))
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "8.0"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
@@ -43,7 +43,7 @@ SYSTEM_PROMPT = """
 - 同じ情報を二度取得しないでください
 
 # 照明操作
-- 全灯 → 4 エコ → 3 常夜灯 → 2 消灯 → 1
+- 全灯 → "4" エコ → "3" 常夜灯 → "2" 消灯 → "1"
 
 # 推論ルール
 - まず必要な情報を関数で取得する
@@ -56,6 +56,10 @@ SYSTEM_PROMPT = """
 - 解決結果が複数ある場合は candidates の先頭を優先する
 - resolve_reference の resolved.value はオブジェクトで返る
 - 必要なキー（channel_id, path など）を取り出してツールに渡す
+
+# ツール呼び出しの注意
+- 引数は正確なJSON形式で出力してください
+- パスに含まれるバックスラッシュは適切にエスケープしてください
 
 # 禁止
 - 「どの情報が必要ですか？」のような質問返し
