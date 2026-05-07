@@ -740,57 +740,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     required=["user_id"],
                 ),
             ),
-            FN(
-                "set_discord_activity",
-                "Discord Rich Presence を更新します。",
-                O(
-                    {
-                        "pid": S(types.Type.INTEGER),
-                        "activity": O(
-                            {
-                                "state": S(types.Type.STRING),
-                                "state_url": S(types.Type.STRING),
-                                "details": S(types.Type.STRING),
-                                "details_url": S(types.Type.STRING),
-                                "timestamps": O(
-                                    {
-                                        "start": S(types.Type.INTEGER),
-                                        "end": S(types.Type.INTEGER),
-                                    }
-                                ),
-                                "assets": O(
-                                    {
-                                        "large_image": S(types.Type.STRING),
-                                        "large_text": S(types.Type.STRING),
-                                        "large_url": S(types.Type.STRING),
-                                        "small_image": S(types.Type.STRING),
-                                        "small_text": S(types.Type.STRING),
-                                        "small_url": S(types.Type.STRING),
-                                    }
-                                ),
-                                "party": O(
-                                    {
-                                        "id": S(types.Type.STRING),
-                                        "size": A(S(types.Type.INTEGER)),
-                                    }
-                                ),
-                                "secrets": O(
-                                    {
-                                        "join": S(types.Type.STRING),
-                                        "spectate": S(types.Type.STRING),
-                                        "match": S(types.Type.STRING),
-                                    }
-                                ),
-                                "instance": S(types.Type.BOOLEAN),
-                                "type": S(types.Type.INTEGER),
-                                "application_id": S(types.Type.STRING),
-                                "name": S(types.Type.STRING),
-                            },
-                        ),
-                    }
-                ),
-            ),
-            FN(
+             FN(
                 "discord_activity_join_invite",
                 "Activity Join 招待を承諾します。",
                 O({"user_id": S(types.Type.STRING)}, required=["user_id"]),
@@ -853,31 +803,6 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     {
                         "kind": S(types.Type.STRING, description="対象の種類。未指定なら全件"),
                     }
-                ),
-            ),
-            FN(
-                "add_reference_alias",
-                "曖昧な名前と実体(IDやパス)の対応を追加または更新します。",
-                O(
-                    {
-                        "kind": S(types.Type.STRING, description="discord_channel, app_path, file_path など"),
-                        "alias": S(types.Type.STRING, description="別名。例: あのチャンネル"),
-                        "value": S(types.Type.STRING, description="実体。例: 1234567890 や C:\\Games\\Game.exe"),
-                        "metadata": types.Schema(type=types.Type.OBJECT, description="任意メタデータ"),
-                        "overwrite": S(types.Type.BOOLEAN, description="同名があれば上書きするか"),
-                    },
-                    required=["kind", "alias", "value"],
-                ),
-            ),
-            FN(
-                "delete_reference_alias",
-                "登録済みの別名を削除します。",
-                O(
-                    {
-                        "kind": S(types.Type.STRING, description="種類"),
-                        "alias": S(types.Type.STRING, description="削除する別名"),
-                    },
-                    required=["kind", "alias"],
                 ),
             ),
             FN(
@@ -975,8 +900,6 @@ TOOL_REGISTRY: dict[str, Callable[[RequestContext, dict[str, Any]], Awaitable[An
 
     "resolve_reference": lambda ctx, args: resolve_reference(args),
     "list_reference_aliases": lambda ctx, args: list_reference_aliases(args),
-    "add_reference_alias": lambda ctx, args: add_reference_alias(args),
-    "delete_reference_alias": lambda ctx, args: delete_reference_alias(args),
 
     "control_light": lambda ctx, args: control_light(args),
 }
@@ -1004,6 +927,7 @@ def build_generation_config() -> types.GenerateContentConfig:
         tools=TOOL_DEFINITIONS,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         temperature=TEMPERATURE,
+        thinking_config=types.ThinkingConfig(include_thoughts=False)
     )
 
 
