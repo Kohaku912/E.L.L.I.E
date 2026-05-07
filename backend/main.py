@@ -130,7 +130,8 @@ def load_reference_registry() -> dict[str, list[dict[str, Any]]]:
                 if isinstance(v, list):
                     result[str(k)] = [item for item in v if isinstance(item, dict)]
             return result
-    except Exception:
+    except Exception as e:
+        print(f"Failed to load reference registry: {e}")
         pass
     return {}
 
@@ -256,11 +257,13 @@ async def api_request(
         else:
             err = detail
 
+        print(f"API HTTP error: status={resp.status_code} path={path} error={err}")
         return {
             "error": err if isinstance(err, str) else str(err),
             "status_code": resp.status_code if resp is not None else None,
         }
     except Exception as e:
+        print(f"API request exception: path={path} error={e}")
         return {"error": str(e)}
 
 
@@ -466,6 +469,7 @@ async def control_light(args: dict[str, Any]) -> Any:
             }
 
     except Exception as e:
+        print(f"Control light error: {e}")
         return {"error": str(e)}
 
 
@@ -946,7 +950,8 @@ async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
         for tc in msg.tool_calls:
             try:
                 args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error in tool call '{tc.function.name}': {e}. arguments={tc.function.arguments}")
                 args = {}
             
             tool_calls.append(
@@ -979,11 +984,13 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
 
         if ai_out.final:
             if not ai_out.answer:
+                print(f"Turn {turn}: AI returned final but answer was empty.")
                 raise HTTPException(status_code=500, detail="AI returned final=true but answer was empty")
             ctx.trace.append({"turn": turn, "type": "final", "ai_duration": round(duration_ai, 4)})
             return ai_out.answer
 
         if not ai_out.tool_calls:
+            print(f"Turn {turn}: AI did not return tool calls.")
             raise HTTPException(status_code=500, detail="AI did not return tool calls")
 
         # Groqのメッセージ履歴に追加するために辞書化して追加
@@ -1006,6 +1013,7 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
 
         for tool_call in ai_out.tool_calls:
             if tool_call.name not in TOOL_REGISTRY:
+                print(f"Turn {turn}: Unknown tool called: {tool_call.name}")
                 raise HTTPException(status_code=400, detail=f"Unknown tool: {tool_call.name}")
 
             start_tool = time.perf_counter()
@@ -1031,6 +1039,7 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
                 }
             )
 
+    print(f"AI loop exceeded max turns ({MAX_AI_TURNS}) for user message: {user_message}")
     raise HTTPException(status_code=409, detail="AI loop exceeded max turns")
 
 
