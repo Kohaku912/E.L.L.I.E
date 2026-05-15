@@ -932,10 +932,43 @@ def to_jsonable(value: Any) -> Any:
         return value
     return str(value)
 
+def parse_tool_arguments(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str):
+        return {}
+
+    text = raw.strip()
+    if not text:
+        return {}
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {"value": parsed}
+    except json.JSONDecodeError:
+        # 余計な文字が混ざっていても { ... } だけ抜き出して再試行
+        m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+                return parsed if isinstance(parsed, dict) else {"value": parsed}
+            except json.JSONDecodeError:
+                pass
+
+        # 最後の保険（単一引用符など）
+        try:
+            import ast
+            parsed = ast.literal_eval(text)
+            return parsed if isinstance(parsed, dict) else {"value": parsed}
+        except Exception:
+            print(f"Failed to parse tool arguments: {text}")
+            return {}
 
 async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
     client = get_groq_client()
-    
+
     response = await client.chat.completions.create(
         model=GROQ_MODEL,
         messages=messages,
@@ -949,12 +982,7 @@ async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
 
     if msg.tool_calls:
         for tc in msg.tool_calls:
-            try:
-                args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError as e:
-                print(f"JSON decode error in tool call '{tc.function.name}': {e}. arguments={tc.function.arguments}")
-                args = {}
-            
+            args = parse_tool_arguments(getattr(tc.function, "arguments", None))
             tool_calls.append(
                 ToolCall(
                     name=tc.function.name,
@@ -962,7 +990,6 @@ async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
                     call_id=tc.id,
                 )
             )
-            
         return AIResult(final=False, tool_calls=tool_calls), msg
 
     text = msg.content
@@ -1001,12 +1028,12 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
         if msg_obj.tool_calls:
             assistant_msg["tool_calls"] = [
                 {
-                    "id": tc.id, 
-                    "type": "function", 
+                    "id": tc.id,
+                    "type": "function",
                     "function": {
-                        "name": tc.function.name, 
-                        "arguments": tc.function.arguments
-                    }
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments if tc.function.arguments else "{}",
+                    },
                 }
                 for tc in msg_obj.tool_calls
             ]
