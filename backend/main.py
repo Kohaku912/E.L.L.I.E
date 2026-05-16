@@ -42,25 +42,19 @@ SYSTEM_PROMPT = """
 - 情報が足りない場合でも、最も関連性の高い関数を選んで取得してください
 - 同じ情報を二度取得しないでください
 
-# 照明操作
-- 全灯 → "4" エコ → "3" 常夜灯 → "2" 消灯 → "1"
-
 # 推論ルール
 - まず必要な情報を関数で取得する
 - 取得した結果を使って最終回答を生成する
-- 最大8回まで繰り返せる
 
 # 参照解決
 - ユーザーが「あの」や「いつもの」などの曖昧な名前を使ったら、対応する実行ツールに渡す前に必ず resolve_reference を使う
 - resolve_reference のデータを、他のツールの引数として使う
-- 解決結果が複数ある場合は candidates の先頭を優先する
 - resolve_reference の resolved.value はオブジェクトで返る
-- 必要なキー（channel_id, path など）を取り出してツールに渡す
 
 # ツール呼び出しの注意
 - 引数は正確なJSON形式で出力してください
-- 引数が不要な関数を呼び出す際は、arguments を空のオブジェクト {} にしてください。
 - パスに含まれるバックスラッシュは適切にエスケープしてください
+- 不要なargumentsを入れないように気をつけてください
 
 # 禁止
 - 「どの情報が必要ですか？」のような質問返し
@@ -186,15 +180,17 @@ def A(items: dict[str, Any], description: str | None = None) -> dict[str, Any]:
 
 
 def FN(name: str, description: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
-    if parameters is None:
-        parameters = {"type": "object", "properties": {}}
+    fn = {
+        "name": name,
+        "description": description,
+    }
+
+    if parameters is not None:
+        fn["parameters"] = parameters
+        
     return {
         "type": "function",
-        "function": {
-            "name": name,
-            "description": description,
-            "parameters": parameters,
-        }
+        "function": fn,
     }
 
 
@@ -371,75 +367,6 @@ async def list_reference_aliases(args: dict[str, Any]) -> Any:
         "registry_path": str(REFERENCE_REGISTRY_PATH),
     }
 
-
-async def add_reference_alias(args: dict[str, Any]) -> Any:
-    kind = str(args.get("kind") or "").strip()
-    alias = str(args.get("alias") or "").strip()
-    value = args.get("value")  # ← 文字列じゃなくそのまま受ける
-    metadata = args.get("metadata") if isinstance(args.get("metadata"), dict) else {}
-    overwrite = bool(args.get("overwrite", True))
-
-    if not kind:
-        return {"error": "kind is required"}
-    if not alias:
-        return {"error": "alias is required"}
-    if value is None:
-        return {"error": "value is required"}
-
-    value_dict = normalize_value(value)
-
-    with REFERENCE_LOCK:
-        registry = load_reference_registry()
-        items = registry.setdefault(kind, [])
-
-        existing_index = next((i for i, item in enumerate(items) if str(item.get("alias") or "") == alias), None)
-
-        entry = {
-            "alias": alias,
-            "value": value_dict,
-            "metadata": metadata,
-        }
-
-        if existing_index is not None:
-            if not overwrite:
-                return {"error": "alias already exists"}
-            items[existing_index] = entry
-        else:
-            items.append(entry)
-
-        save_reference_registry(registry)
-
-    return {
-        "ok": True,
-        "kind": kind,
-        "alias": alias,
-        "value": value_dict,
-    }
-
-async def delete_reference_alias(args: dict[str, Any]) -> Any:
-    kind = str(args.get("kind") or "").strip()
-    alias = str(args.get("alias") or "").strip()
-
-    if not kind:
-        return {"error": "kind is required"}
-    if not alias:
-        return {"error": "alias is required"}
-
-    with REFERENCE_LOCK:
-        registry = load_reference_registry()
-        items = registry.get(kind, [])
-        before = len(items)
-        items = [item for item in items if str(item.get("alias") or "") != alias]
-        registry[kind] = items
-        save_reference_registry(registry)
-
-    return {
-        "ok": True,
-        "removed": before - len(items),
-        "kind": kind,
-        "alias": alias,
-        "registry_path": str(REFERENCE_REGISTRY_PATH),
-    }
 
 async def control_light(args: dict[str, Any]) -> Any:
     mode = args.get("mode")
@@ -670,7 +597,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     ),
     FN(
         "get_discord_channel",
-        "チャンネル詳細を取得します。",
+        "ボイス、テキストチャンネル詳細を取得します。",
         O({"channel_id": S("string")}, required=["channel_id"]),
     ),
     FN("get_discord_voice_settings", "Discordのボイス設定を取得します。"),
@@ -932,43 +859,10 @@ def to_jsonable(value: Any) -> Any:
         return value
     return str(value)
 
-def parse_tool_arguments(raw: Any) -> dict[str, Any]:
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        return raw
-    if not isinstance(raw, str):
-        return {}
-
-    text = raw.strip()
-    if not text:
-        return {}
-
-    try:
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else {"value": parsed}
-    except json.JSONDecodeError:
-        # 余計な文字が混ざっていても { ... } だけ抜き出して再試行
-        m = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if m:
-            try:
-                parsed = json.loads(m.group(0))
-                return parsed if isinstance(parsed, dict) else {"value": parsed}
-            except json.JSONDecodeError:
-                pass
-
-        # 最後の保険（単一引用符など）
-        try:
-            import ast
-            parsed = ast.literal_eval(text)
-            return parsed if isinstance(parsed, dict) else {"value": parsed}
-        except Exception:
-            print(f"Failed to parse tool arguments: {text}")
-            return {}
 
 async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
     client = get_groq_client()
-
+    
     response = await client.chat.completions.create(
         model=GROQ_MODEL,
         messages=messages,
@@ -982,7 +876,12 @@ async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
 
     if msg.tool_calls:
         for tc in msg.tool_calls:
-            args = parse_tool_arguments(getattr(tc.function, "arguments", None))
+            try:
+                args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error in tool call '{tc.function.name}': {e}. arguments={tc.function.arguments}")
+                args = {}
+            
             tool_calls.append(
                 ToolCall(
                     name=tc.function.name,
@@ -990,6 +889,7 @@ async def call_ai(messages: list[dict[str, Any]]) -> tuple[AIResult, Any]:
                     call_id=tc.id,
                 )
             )
+            
         return AIResult(final=False, tool_calls=tool_calls), msg
 
     text = msg.content
@@ -1028,12 +928,12 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
         if msg_obj.tool_calls:
             assistant_msg["tool_calls"] = [
                 {
-                    "id": tc.id,
-                    "type": "function",
+                    "id": tc.id, 
+                    "type": "function", 
                     "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments if tc.function.arguments else "{}",
-                    },
+                        "name": tc.function.name, 
+                        "arguments": tc.function.arguments
+                    }
                 }
                 for tc in msg_obj.tool_calls
             ]
@@ -1052,7 +952,8 @@ async def run_ai_loop(user_message: str, ctx: RequestContext) -> str:
             ctx.trace.append({
                 "turn": turn,
                 "tool": tool_call.name,
-                "result_keys": res_keys,
+                "arguments": to_jsonable(tool_call.arguments),
+                "result": to_jsonable(result),
                 "tool_duration": round(duration_tool, 4),
                 "ai_duration": round(duration_ai, 4)
             })
