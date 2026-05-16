@@ -748,7 +748,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     ),
     FN(
         "control_light",
-        "部屋の照明を操作します。4=全灯, 3=エコ, 2=常夜灯, 1=消灯",
+        "部屋の照明を操作します。引数は4=全灯, 3=エコ, 2=常夜灯, 1=消灯",
         O(
             {
                 "mode": S("string", description="1=消灯, 2=常夜灯, 3=エコ, 4=全灯"),
